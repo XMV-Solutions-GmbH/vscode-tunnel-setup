@@ -504,13 +504,15 @@ if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_USER@$SERVER_IP" "echo ok" 
         ssh -t "root@$SERVER_IP" bash << EOF
 set -e
 
-# Create user with home directory
-if ! id "$SSH_USER" &>/dev/null; then
-    useradd -m -s /bin/bash "$SSH_USER"
-    echo "✓ User '$SSH_USER' created"
-else
+# Check if user already exists
+if id "$SSH_USER" &>/dev/null; then
     echo "✓ User '$SSH_USER' already exists"
+    exit 0
 fi
+
+# Create user with home directory
+useradd -m -s /bin/bash "$SSH_USER"
+echo "✓ User '$SSH_USER' created"
 
 # Get user's home directory
 USER_HOME=\$(getent passwd "$SSH_USER" | cut -d: -f6)
@@ -529,11 +531,20 @@ else
     echo "⚠ No /root/.ssh/authorized_keys found"
 fi
 
-# Add user to sudo group (optional, for service management)
+# Add user to sudo group (for service management)
 if command -v usermod &>/dev/null; then
     usermod -aG sudo "$SSH_USER" 2>/dev/null || usermod -aG wheel "$SSH_USER" 2>/dev/null || true
+    echo "✓ User added to sudo group"
 fi
 
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  Please set a password for '$SSH_USER' (required for sudo):"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+passwd "$SSH_USER"
+
+echo ""
 echo "✓ User setup complete"
 EOF
         
