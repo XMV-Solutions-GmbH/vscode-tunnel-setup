@@ -197,15 +197,31 @@ echo "║  The GitHub Device Code will appear below.                     ║"
 echo "║  Open: https://github.com/login/device                         ║"
 echo "║  Enter the code and authenticate with GitHub.                  ║"
 echo "║                                                                ║"
-echo "║  After authenticating, press Ctrl+C to continue.               ║"
+echo "║  The script will continue automatically after authentication.  ║"
 echo "╚════════════════════════════════════════════════════════════════╝"
 echo ""
 
 # First set GitHub as the auth provider
 /usr/local/bin/code tunnel user login --provider github || true
 
-# Run tunnel in foreground - user sees output directly and presses Ctrl+C when done
-/usr/local/bin/code tunnel --accept-server-license-terms --name "$MACHINE_NAME" || true
+# Run tunnel and wait for successful connection (auth complete)
+# We pipe through a while loop that exits when "Connected to" is detected
+AUTH_LOG="/tmp/tunnel_auth_$$.log"
+/usr/local/bin/code tunnel --accept-server-license-terms --name "$MACHINE_NAME" 2>&1 | while IFS= read -r line; do
+    echo "$line"
+    echo "$line" >> "$AUTH_LOG"
+    # When we see "Connected to", auth is complete - kill the tunnel
+    if echo "$line" | grep -q "Connected to"; then
+        echo ""
+        echo "✅ Authentication successful! Tunnel connected."
+        echo "🔄 Stopping foreground tunnel to start as service..."
+        # Get parent PID (the code tunnel process) and kill it
+        sleep 2
+        pkill -P $$ -f "code tunnel" 2>/dev/null || true
+        break
+    fi
+done
+rm -f "$AUTH_LOG"
 
 echo ""
 
