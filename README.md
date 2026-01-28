@@ -81,18 +81,29 @@ cd vscode-tunnel-setup
 ## Usage
 
 ```text
-Usage: setup-vscode-tunnel.sh <server-ip> [-u <username>] [-n <machine-name>]
+Usage: ./setup-vscode-tunnel.sh <server-ip> [-u <username>] [-n <machine-name>] [-p <port>] [-i <keyfile>] [-f]
+       ./setup-vscode-tunnel.sh --export [-n <machine-name>] [-u <username>]
+       ./setup-vscode-tunnel.sh --export-script
 
 Options:
-  <server-ip>       IP address or hostname of the server (required)
-  -u <username>     SSH username (default: root)
+  <server-ip>       IP address or hostname of the server (required for SSH mode)
+  -u <username>     SSH username and service user (default: root)
+                    If user doesn't exist, script will connect as root,
+                    create the user, and copy SSH keys automatically.
   -n <machine-name> Name for the VS Code Tunnel instance
-  -h                Display help message
+  -p <port>         SSH port (default: 22)
+  -i <keyfile>      Path to SSH private key file
+  -f                Force: skip host key verification (useful for reinstalled servers)
+  --export          Export the remote script with machine name for copy/paste
+  --export-script   Export only the core script function (for testing)
+  -h, --help        Display this help message
 
 Examples:
-  ./setup-vscode-tunnel.sh 192.168.1.100
-  ./setup-vscode-tunnel.sh 192.168.1.100 -u admin
-  ./setup-vscode-tunnel.sh 192.168.1.100 -u admin -n my-server
+  ./setup-vscode-tunnel.sh 192.168.1.100 -n my-server
+  ./setup-vscode-tunnel.sh 192.168.1.100 -u vscode -n my-server     # Creates user 'vscode' if needed
+  ./setup-vscode-tunnel.sh server.example.com -p 2222 -n my-server  # Custom SSH port
+  ./setup-vscode-tunnel.sh server.example.com -i ~/.ssh/id_ed25519 -n my-server
+  ./setup-vscode-tunnel.sh server.example.com -f -n my-server       # Skip host key check
 ```
 
 ---
