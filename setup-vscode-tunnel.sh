@@ -77,6 +77,7 @@ echo -e "${BLUE}========================================${NC}"
 echo ""
 
 # Remote script to be executed on the server
+# shellcheck disable=SC2016
 REMOTE_SCRIPT='
 set -e
 
