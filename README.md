@@ -63,7 +63,7 @@ After setup, connect via:
 ### Option 1: One-liner (recommended)
 
 ```bash
-curl -fsSL https://github.com/XMV-Solutions-GmbH/vscode-tunnel-setup/releases/latest/download/setup-vscode-tunnel.sh | bash -s -- <server-ip> -n <tunnel-name>
+curl -fsSL https://github.com/XMV-Solutions-GmbH/vscode-tunnel-setup/releases/latest/download/setup-vscode-tunnel.sh | bash -s -- <server-ip>
 ```
 
 ### Option 2: Download from latest release
