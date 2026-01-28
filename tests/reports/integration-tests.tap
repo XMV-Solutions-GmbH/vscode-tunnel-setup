@@ -1,0 +1,19 @@
+1..18
+ok 1 arch_detection_x64: Detects x86_64 → x64
+ok 2 arch_detection_arm64: Detects aarch64 → arm64
+ok 3 arch_detection_armhf: Detects armv7l → armhf
+ok 4 arch_unsupported_error: Unknown arch exits 1
+ok 5 cli_install_idempotent: Skip install if exists
+ok 6 cli_install_needed: Detects missing CLI
+ok 7 cli_install_curl: Downloads via curl
+ok 8 cli_install_wget: Downloads via wget fallback
+ok 9 cli_install_no_downloader: Error if no curl/wget
+ok 10 service_create_new: Creates systemd service
+ok 11 service_skip_existing: Skips if name matches
+ok 12 service_update_name: Updates if name differs
+ok 13 service_file_content_valid: Service file has correct structure
+ok 14 service_uses_correct_binary_path: ExecStart points to /usr/local/bin/code
+ok 15 service_accepts_licence_terms: Service includes licence acceptance flag
+ok 16 download_url_x64: Correct URL for x64 architecture
+ok 17 download_url_arm64: Correct URL for arm64 architecture
+ok 18 download_url_armhf: Correct URL for armhf architecture

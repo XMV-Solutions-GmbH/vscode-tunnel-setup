@@ -1,0 +1,41 @@
+# Real Docker Integration Test Environment
+# Ubuntu with systemd for realistic service testing
+
+FROM ubuntu:22.04
+
+# Avoid interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install systemd and required packages
+RUN apt-get update && apt-get install -y \
+    systemd \
+    systemd-sysv \
+    curl \
+    wget \
+    ca-certificates \
+    sudo \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -f /lib/systemd/system/multi-user.target.wants/* \
+    && rm -f /etc/systemd/system/*.wants/* \
+    && rm -f /lib/systemd/system/local-fs.target.wants/* \
+    && rm -f /lib/systemd/system/sockets.target.wants/*udev* \
+    && rm -f /lib/systemd/system/sockets.target.wants/*initctl* \
+    && rm -f /lib/systemd/system/basic.target.wants/* \
+    && rm -f /lib/systemd/system/anaconda.target.wants/*
+
+# Create a non-root user (optional, for testing)
+RUN useradd -m -s /bin/bash testuser && \
+    echo "testuser:testpass" | chpasswd && \
+    usermod -aG sudo testuser
+
+# Create directories
+RUN mkdir -p /usr/local/bin /var/log
+
+# Volume for persistent data (survives restart)
+VOLUME ["/sys/fs/cgroup"]
+
+# Expose nothing - tunnel is outbound only
+STOPSIGNAL SIGRTMIN+3
+
+# Start systemd
+CMD ["/lib/systemd/systemd"]

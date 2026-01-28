@@ -1,0 +1,55 @@
+# Docker Compose configuration for VS Code Tunnel Setup Script E2E tests
+# Orchestrates the mock server container for testing
+
+version: '3.8'
+
+services:
+  mock-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.mock-server
+    image: vscode-tunnel-test:latest
+    container_name: vscode-tunnel-test-server
+    ports:
+      - "${MOCK_SSH_PORT:-2222}:22"
+    environment:
+      - MOCK_MODE=true
+    volumes:
+      # Mount mock CLI for easy updates during testing
+      - ./mock_code_cli.sh:/usr/local/bin/code-mock:ro
+      - ./mock_systemctl.sh:/usr/local/bin/systemctl:ro
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "22"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+    networks:
+      - test-network
+
+  # Optional: Test runner container
+  test-runner:
+    image: bats/bats:latest
+    container_name: vscode-tunnel-test-runner
+    depends_on:
+      mock-server:
+        condition: service_healthy
+    volumes:
+      - ../..:/workspace:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    working_dir: /workspace
+    environment:
+      - MOCK_SSH_HOST=mock-server
+      - MOCK_SSH_PORT=22
+      - MOCK_SSH_USER=testuser
+      - MOCK_SSH_PASSWORD=testpass
+    command: ["bats", "tests/"]
+    networks:
+      - test-network
+    profiles:
+      - testing
+
+networks:
+  test-network:
+    driver: bridge

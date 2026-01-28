@@ -1,0 +1,16 @@
+1..15
+ok 1 help_flag_shows_usage: -h displays help text and exits 0
+ok 2 no_args_shows_help: No arguments displays help
+ok 3 ip_only_prompts_for_name: IP without -n triggers prompt
+ok 4 custom_user_flag: -u admin sets SSH_USER
+ok 5 machine_name_flag: -n my-server sets MACHINE_NAME
+ok 6 all_flags_combined: All flags parsed correctly
+ok 7 invalid_flag_shows_help: Unknown flag shows help
+ok 8 empty_machine_name_error: Empty name after prompt exits 1
+ok 9 default_user_is_root: Default SSH_USER is root when -u not specified
+ok 10 ip_address_captured_correctly: Various IP formats work
+ok 11 hostname_as_server: Hostname works as server address
+ok 12 machine_name_with_special_chars: Machine name with hyphens and numbers
+ok 13 flags_order_independent: Flags can be in any order
+ok 14 only_flag_no_ip_shows_error: Flag without IP shows error
+ok 15 interactive_name_input: Name provided via stdin works

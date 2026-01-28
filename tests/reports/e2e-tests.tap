@@ -1,0 +1,7 @@
+1..6
+ok 1 fresh_install_complete: Full flow on clean system
+ok 2 rerun_idempotent: Second run changes nothing
+ok 3 name_change_updates: Changing name updates service
+ok 4 service_survives_reboot: Service enabled correctly
+ok 5 error_handling_ssh_failure: Handles SSH connection failure gracefully
+ok 6 full_workflow_simulation: Complete workflow without actual network
