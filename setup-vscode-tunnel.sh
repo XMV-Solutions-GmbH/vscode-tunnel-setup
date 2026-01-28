@@ -115,6 +115,37 @@ elif [[ -z "$SERVER_IP" ]]; then
     show_help
 fi
 
+# Validate Linux username format
+# Linux usernames: lowercase, start with letter, can contain letters, digits, underscore, hyphen
+# Max 32 chars, no dots or special characters
+validate_linux_username() {
+    local username="$1"
+    
+    # Check length (1-32 characters)
+    if [[ ${#username} -lt 1 || ${#username} -gt 32 ]]; then
+        return 1
+    fi
+    
+    # Must start with lowercase letter, contain only lowercase letters, digits, underscore, hyphen
+    if [[ ! "$username" =~ ^[a-z][a-z0-9_-]*$ ]]; then
+        return 1
+    fi
+    
+    return 0
+}
+
+if [[ "$SSH_USER" != "root" ]] && ! validate_linux_username "$SSH_USER"; then
+    echo -e "${RED}Error: Invalid Linux username '$SSH_USER'${NC}"
+    echo -e "${RED}  Linux usernames must:${NC}"
+    echo -e "${RED}    - Start with a lowercase letter${NC}"
+    echo -e "${RED}    - Contain only lowercase letters, digits, underscore (_), or hyphen (-)${NC}"
+    echo -e "${RED}    - Be 1-32 characters long${NC}"
+    echo -e "${RED}    - NOT contain dots, spaces, or uppercase letters${NC}"
+    echo ""
+    echo -e "${YELLOW}Suggestion: Use 'dkoller' or 'david-koller' instead of 'david.koller'${NC}"
+    exit 1
+fi
+
 # Prompt for machine name if not provided (SSH mode)
 if [[ "$EXPORT_MODE" != "true" && "$EXPORT_SCRIPT_ONLY" != "true" && -z "$MACHINE_NAME" ]]; then
     echo -e "${YELLOW}Please enter a name for this VS Code Tunnel instance:${NC}"
