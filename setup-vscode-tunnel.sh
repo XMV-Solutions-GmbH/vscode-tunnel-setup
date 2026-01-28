@@ -125,6 +125,27 @@ elif [[ -z "$SERVER_IP" ]]; then
     show_help
 fi
 
+# Warn about running as root and suggest a dedicated user
+if [[ "$EXPORT_MODE" != "true" && "$EXPORT_SCRIPT_ONLY" != "true" && "$SSH_USER" == "root" ]]; then
+    echo ""
+    echo -e "${YELLOW}⚠  Running the tunnel service as root is not recommended.${NC}"
+    echo -e "${YELLOW}   It's better to use a dedicated user (e.g., 'vscode').${NC}"
+    echo ""
+    echo -e "Enter username for the tunnel service ${CYAN}[vscode]${NC}: \c"
+    read -r USER_INPUT
+    
+    if [[ -z "$USER_INPUT" ]]; then
+        SSH_USER="vscode"
+        echo -e "${GREEN}✓ Using 'vscode' as service user${NC}"
+    elif [[ "$USER_INPUT" == "root" ]]; then
+        echo -e "${YELLOW}⚠ Proceeding with root (not recommended)${NC}"
+    else
+        SSH_USER="$USER_INPUT"
+        echo -e "${GREEN}✓ Using '$SSH_USER' as service user${NC}"
+    fi
+    echo ""
+fi
+
 # Validate Linux username format
 # Linux usernames: lowercase, start with letter, can contain letters, digits, underscore, hyphen
 # Max 32 chars, no dots or special characters
@@ -457,7 +478,7 @@ done
 if [[ -n "$DEVICE_CODE" ]]; then
     echo ""
     echo "╔════════════════════════════════════════════════════════════════╗"
-    echo "║                                                                ║"
+    echo "                                                                  "
     echo "    GitHub Device Code:  $DEVICE_CODE  (📋 copied to clipboard)"
     echo ""
     echo "    🌐 https://github.com/login/device  (opening in browser...)"
@@ -465,7 +486,7 @@ if [[ -n "$DEVICE_CODE" ]]; then
     echo "    Just paste the code and authenticate with GitHub."
     echo ""
     echo "    Waiting for authentication (up to 180 seconds)..."
-    echo "║                                                                ║"
+    echo "                                                                  "
     echo "╚════════════════════════════════════════════════════════════════╝"
     echo ""
 else
@@ -561,7 +582,7 @@ fi
 # =============================================================================
 
 echo -e "${BLUE}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║${NC}  ${BOLD}VS Code Tunnel Setup${NC}"
+echo -e "${BLUE} ${NC}  ${BOLD}VS Code Tunnel Setup${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "  Server:       ${CYAN}$SSH_USER@$SERVER_IP${NC}"
@@ -729,7 +750,7 @@ kill $DEVICE_CODE_PID 2>/dev/null || true
 
 echo ""
 echo -e "${GREEN}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║${NC}  ${BOLD}✅ Setup complete!${NC}"
+echo -e "${GREEN} ${NC}  ${BOLD}✅ Setup complete!${NC}"
 echo -e "${GREEN}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "  Connect via:"
