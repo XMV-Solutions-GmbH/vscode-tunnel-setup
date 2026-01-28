@@ -238,7 +238,17 @@ ssh_test() {
     opts=$(build_ssh_opts)
     
     # shellcheck disable=SC2086
-    ssh -o BatchMode=yes -o ConnectTimeout=10 $opts "$user@$host" "echo ok" &>/dev/null
+    SSH_TEST_OUTPUT=$(ssh -o BatchMode=yes -o ConnectTimeout=10 $opts "$user@$host" "echo ok" 2>&1)
+    SSH_TEST_EXIT=$?
+    
+    # Check for host key verification issues
+    if echo "$SSH_TEST_OUTPUT" | grep -qi "host key verification failed\|known_hosts\|REMOTE HOST IDENTIFICATION HAS CHANGED\|host key.*changed\|offending.*key"; then
+        SSH_HOST_KEY_ERROR=true
+    else
+        SSH_HOST_KEY_ERROR=false
+    fi
+    
+    return $SSH_TEST_EXIT
 }
 
 # =============================================================================
@@ -614,9 +624,19 @@ if ! ssh_test "$SSH_USER" "$SERVER_IP"; then
         
         if ! ssh_test "root" "$SERVER_IP"; then
             echo -e "${RED}✗ Cannot connect as root either.${NC}"
-            echo -e "${RED}  Please ensure:${NC}"
-            echo -e "${RED}    - User '$SSH_USER' exists on the server, or${NC}"
-            echo -e "${RED}    - Root SSH access is available to create the user${NC}"
+            
+            # Check if this was a host key issue
+            if [[ "$SSH_HOST_KEY_ERROR" == "true" ]]; then
+                echo -e "${YELLOW}  This appears to be a host key verification issue.${NC}"
+                echo -e "${YELLOW}  The server's host key may have changed (e.g., after reinstall).${NC}"
+                echo -e ""
+                echo -e "${CYAN}  To bypass host key checking, use the -f flag:${NC}"
+                echo -e "${WHITE}    $0 $SERVER_IP -f${NC}"
+            else
+                echo -e "${RED}  Please ensure:${NC}"
+                echo -e "${RED}    - User '$SSH_USER' exists on the server, or${NC}"
+                echo -e "${RED}    - Root SSH access is available to create the user${NC}"
+            fi
             exit 1
         fi
         
@@ -692,6 +712,15 @@ USERSCRIPT
         echo -e "${GREEN}✓ Connection as '$SSH_USER' verified${NC}"
     else
         echo -e "${RED}✗ Cannot connect as root@$SERVER_IP${NC}"
+        
+        # Check if this was a host key issue
+        if [[ "$SSH_HOST_KEY_ERROR" == "true" ]]; then
+            echo -e "${YELLOW}  This appears to be a host key verification issue.${NC}"
+            echo -e "${YELLOW}  The server's host key may have changed (e.g., after reinstall).${NC}"
+            echo -e ""
+            echo -e "${CYAN}  To bypass host key checking, use the -f flag:${NC}"
+            echo -e "${WHITE}    $0 $SERVER_IP -f${NC}"
+        fi
         exit 1
     fi
 fi
