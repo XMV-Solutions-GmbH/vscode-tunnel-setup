@@ -201,6 +201,9 @@ echo "║  After authenticating, press Ctrl+C to continue.               ║"
 echo "╚════════════════════════════════════════════════════════════════╝"
 echo ""
 
+# First set GitHub as the auth provider
+/usr/local/bin/code tunnel user login --provider github || true
+
 # Run tunnel in foreground - user sees output directly and presses Ctrl+C when done
 /usr/local/bin/code tunnel --accept-server-license-terms --name "$MACHINE_NAME" || true
 
