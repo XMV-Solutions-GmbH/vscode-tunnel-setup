@@ -34,23 +34,24 @@ EXPORT_SCRIPT_ONLY=false
 # Display help
 show_help() {
     echo "Usage: $0 <server-ip> [-u <username>] [-n <machine-name>]"
-    echo "       $0 --export [-n <machine-name>]"
+    echo "       $0 --export [-n <machine-name>] [-u <username>]"
     echo "       $0 --export-script"
     echo ""
     echo "Options:"
     echo "  <server-ip>       IP address of the server (required for SSH mode)"
-    echo "  -u <username>     SSH username (default: root)"
+    echo "  -u <username>     SSH username and service user (default: root)"
+    echo "                    If user doesn't exist, script will connect as root,"
+    echo "                    create the user, and copy SSH keys automatically."
     echo "  -n <machine-name> Name for the VS Code Tunnel instance"
     echo "  --export          Export the remote script with machine name for copy/paste"
     echo "  --export-script   Export only the core script function (for testing)"
     echo "  -h, --help        Display this help message"
     echo ""
     echo "Examples:"
-    echo "  $0 192.168.1.100"
-    echo "  $0 192.168.1.100 -u admin"
-    echo "  $0 192.168.1.100 -u admin -n my-server"
+    echo "  $0 192.168.1.100 -n my-server"
+    echo "  $0 192.168.1.100 -u vscode -n my-server  # Creates user 'vscode' if needed"
     echo "  $0 --export -n my-server | ssh user@host bash"
-    echo "  $0 --export-script  # For integration testing"
+    echo "  $0 --export -u vscode -n my-server       # Service runs as 'vscode' user"
     exit 0
 }
 
@@ -133,6 +134,7 @@ fi
 
 generate_remote_script() {
     local machine_name="$1"
+    local run_as_user="${2:-root}"
     
     cat << 'REMOTE_SCRIPT_EOF'
 #!/bin/bash
@@ -147,8 +149,9 @@ set -e
 
 REMOTE_SCRIPT_EOF
 
-    # Inject machine name variable
+    # Inject machine name and user variables
     echo "MACHINE_NAME=\"$machine_name\""
+    echo "RUN_AS_USER=\"$run_as_user\""
     echo ""
     
     # The rest of the script (static part)
@@ -259,11 +262,18 @@ print_step "Configuring Systemd Service"
 SERVICE_FILE="/etc/systemd/system/code-tunnel.service"
 SERVICE_NEEDED=false
 
+# Determine home directory for the service user
+if [[ "$RUN_AS_USER" == "root" ]]; then
+    SERVICE_USER_HOME="/root"
+else
+    SERVICE_USER_HOME=$(getent passwd "$RUN_AS_USER" | cut -d: -f6 || echo "/home/$RUN_AS_USER")
+fi
+
 if [[ -f "$SERVICE_FILE" ]]; then
-    if grep -q "name $MACHINE_NAME" "$SERVICE_FILE"; then
-        print_success "Systemd service already configured for '$MACHINE_NAME'"
+    if grep -q "name $MACHINE_NAME" "$SERVICE_FILE" && grep -q "User=$RUN_AS_USER" "$SERVICE_FILE"; then
+        print_success "Systemd service already configured for '$MACHINE_NAME' (user: $RUN_AS_USER)"
     else
-        print_info "Service exists with different name, updating..."
+        print_info "Service exists with different config, updating..."
         SERVICE_NEEDED=true
     fi
 else
@@ -271,7 +281,7 @@ else
 fi
 
 if $SERVICE_NEEDED; then
-    print_info "Creating service file..."
+    print_info "Creating service file (running as user: $RUN_AS_USER)..."
     
     SERVICE_CONTENT="[Unit]
 Description=VS Code Tunnel
@@ -279,11 +289,11 @@ After=network.target
 
 [Service]
 Type=simple
-User=root
+User=$RUN_AS_USER
 ExecStart=/usr/local/bin/code tunnel --accept-server-license-terms --name $MACHINE_NAME
 Restart=always
 RestartSec=10
-Environment=HOME=/root
+Environment=HOME=$SERVICE_USER_HOME
 
 [Install]
 WantedBy=multi-user.target"
@@ -303,7 +313,7 @@ WantedBy=multi-user.target"
         systemctl enable code-tunnel.service
     fi
     
-    print_success "Systemd service created and enabled"
+    print_success "Systemd service created and enabled (user: $RUN_AS_USER)"
 fi
 
 # -----------------------------------------------------------------------------
@@ -445,7 +455,8 @@ fi
 
 if [[ "$EXPORT_MODE" == "true" ]]; then
     # Output the complete remote script for copy/paste or piping
-    generate_remote_script "$MACHINE_NAME"
+    # In export mode, default to root if no user specified
+    generate_remote_script "$MACHINE_NAME" "${SSH_USER:-root}"
     exit 0
 fi
 
@@ -461,8 +472,91 @@ echo -e "  Server:       ${CYAN}$SSH_USER@$SERVER_IP${NC}"
 echo -e "  Tunnel name:  ${CYAN}$MACHINE_NAME${NC}"
 echo ""
 
-# Generate the remote script
-REMOTE_SCRIPT=$(generate_remote_script "$MACHINE_NAME")
+# -----------------------------------------------------------------------------
+# Check if user exists and handle user creation if needed
+# -----------------------------------------------------------------------------
+
+USER_EXISTS=true
+USER_CREATED=false
+
+# Test SSH connection with specified user
+echo -e "${GREEN}🔗 Testing connection as $SSH_USER@$SERVER_IP...${NC}"
+if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_USER@$SERVER_IP" "echo ok" &>/dev/null; then
+    USER_EXISTS=false
+    echo -e "${YELLOW}⚠ Cannot connect as '$SSH_USER'${NC}"
+    
+    # Only try root fallback if user is not root
+    if [[ "$SSH_USER" != "root" ]]; then
+        echo -e "${YELLOW}  Trying to connect as root to create user...${NC}"
+        
+        if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "root@$SERVER_IP" "echo ok" &>/dev/null; then
+            echo -e "${RED}✗ Cannot connect as root either.${NC}"
+            echo -e "${RED}  Please ensure:${NC}"
+            echo -e "${RED}    - User '$SSH_USER' exists on the server, or${NC}"
+            echo -e "${RED}    - Root SSH access is available to create the user${NC}"
+            exit 1
+        fi
+        
+        echo -e "${GREEN}✓ Connected as root${NC}"
+        echo -e "${YELLOW}  Creating user '$SSH_USER'...${NC}"
+        
+        # Create user and copy SSH key from root
+        ssh -t "root@$SERVER_IP" bash << EOF
+set -e
+
+# Create user with home directory
+if ! id "$SSH_USER" &>/dev/null; then
+    useradd -m -s /bin/bash "$SSH_USER"
+    echo "✓ User '$SSH_USER' created"
+else
+    echo "✓ User '$SSH_USER' already exists"
+fi
+
+# Get user's home directory
+USER_HOME=\$(getent passwd "$SSH_USER" | cut -d: -f6)
+
+# Create .ssh directory for the user
+mkdir -p "\$USER_HOME/.ssh"
+chmod 700 "\$USER_HOME/.ssh"
+
+# Copy root's authorized_keys to the new user
+if [[ -f /root/.ssh/authorized_keys ]]; then
+    cp /root/.ssh/authorized_keys "\$USER_HOME/.ssh/authorized_keys"
+    chmod 600 "\$USER_HOME/.ssh/authorized_keys"
+    chown -R "$SSH_USER:$SSH_USER" "\$USER_HOME/.ssh"
+    echo "✓ SSH keys copied from root to '$SSH_USER'"
+else
+    echo "⚠ No /root/.ssh/authorized_keys found"
+fi
+
+# Add user to sudo group (optional, for service management)
+if command -v usermod &>/dev/null; then
+    usermod -aG sudo "$SSH_USER" 2>/dev/null || usermod -aG wheel "$SSH_USER" 2>/dev/null || true
+fi
+
+echo "✓ User setup complete"
+EOF
+        
+        USER_CREATED=true
+        echo -e "${GREEN}✓ User '$SSH_USER' created and SSH keys copied${NC}"
+        
+        # Verify we can now connect as the new user
+        sleep 1
+        if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_USER@$SERVER_IP" "echo ok" &>/dev/null; then
+            echo -e "${RED}✗ Still cannot connect as '$SSH_USER' after creation${NC}"
+            exit 1
+        fi
+        echo -e "${GREEN}✓ Connection as '$SSH_USER' verified${NC}"
+    else
+        echo -e "${RED}✗ Cannot connect as root@$SERVER_IP${NC}"
+        exit 1
+    fi
+fi
+
+echo ""
+
+# Generate the remote script with the target user
+REMOTE_SCRIPT=$(generate_remote_script "$MACHINE_NAME" "$SSH_USER")
 
 # Establish SSH connection and execute script
 echo -e "${GREEN}🔗 Connecting to $SSH_USER@$SERVER_IP...${NC}"
