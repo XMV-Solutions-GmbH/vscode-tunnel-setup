@@ -3,6 +3,12 @@
 
 This guide describes all necessary steps to set up a professional open-source project from scratch. It is based on best practices and can be used as a template for all OSS projects.
 
+Our contact information:
+
+- **Email**: <oss@xmv.de>
+- **Website**: <https://xmv.de/en/oss/>
+- **Name**: XMV Solutions GmbH
+
 ---
 
 ## Table of Contents
@@ -189,6 +195,7 @@ chore: update dependencies
 ## Questions?
 
 Open an issue or start a discussion!
+
 ```
 
 ### 2.3 SECURITY.md

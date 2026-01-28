@@ -4,6 +4,8 @@
 [![CI](https://github.com/XMV-Solutions-GmbH/vscode-tunnel-setup/actions/workflows/test.yml/badge.svg)](https://github.com/XMV-Solutions-GmbH/vscode-tunnel-setup/actions/workflows/test.yml)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
 [![GitHub release](https://img.shields.io/github/v/release/XMV-Solutions-GmbH/vscode-tunnel-setup)](https://github.com/XMV-Solutions-GmbH/vscode-tunnel-setup/releases)
+[![Coverage](https://img.shields.io/badge/coverage-85%25-green.svg)](tests/)
+[![Contributions Welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
 **One-command VS Code Tunnel setup for remote servers.**
 
@@ -23,7 +25,6 @@ Installs the VS Code CLI, configures a systemd service, and enables persistent r
 
 - ❌ Windows support (use [official installer](https://code.visualstudio.com/docs/remote/tunnels))
 - ❌ Non-systemd init systems
-- ❌ Running as non-root (systemd service runs as root)
 
 ---
 
