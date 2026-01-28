@@ -197,75 +197,72 @@ sleep 2
 echo "⚠ Waiting for GitHub Device Code..."
 echo ""
 
-# Create a temp file for tunnel output
-TUNNEL_OUTPUT=$(mktemp)
-TUNNEL_CONNECTED=false
-AUTH_TIMEOUT=180
+# Create named pipe for tunnel output
+TUNNEL_FIFO="/tmp/tunnel_output_$$"
+mkfifo "$TUNNEL_FIFO"
 
-# Start tunnel in background, capture output
-/usr/local/bin/code tunnel --accept-server-license-terms --name "$MACHINE_NAME" > "$TUNNEL_OUTPUT" 2>&1 &
+# Start tunnel, write to FIFO
+/usr/local/bin/code tunnel --accept-server-license-terms --name "$MACHINE_NAME" > "$TUNNEL_FIFO" 2>&1 &
 TUNNEL_PID=$!
 
-# Wait for Device Code to appear
+# Read from FIFO and process output
+AUTH_TIMEOUT=180
 DEVICE_CODE=""
-WAIT_COUNT=0
-while [[ -z "$DEVICE_CODE" ]] && [[ $WAIT_COUNT -lt 30 ]]; do
-    sleep 1
-    WAIT_COUNT=$((WAIT_COUNT + 1))
-    # Extract device code from output (format: "use code XXXX-XXXX")
-    if [[ -f "$TUNNEL_OUTPUT" ]]; then
-        DEVICE_CODE=$(grep -oE "[A-Z0-9]{4}-[A-Z0-9]{4}" "$TUNNEL_OUTPUT" 2>/dev/null | head -1)
-    fi
-done
+TUNNEL_CONNECTED=false
+START_TIME=$(date +%s)
 
-if [[ -n "$DEVICE_CODE" ]]; then
-    echo ""
-    echo "╔════════════════════════════════════════════════════════════════╗"
-    echo "║                                                                ║"
-    echo "║   GitHub Device Code:  $DEVICE_CODE                               ║"
-    echo "║                                                                ║"
-    echo "║   Open: https://github.com/login/device                        ║"
-    echo "║                                                                ║"
-    echo "╚════════════════════════════════════════════════════════════════╝"
-    echo ""
-    echo "  Please authenticate in your browser with the code above."
-    echo ""
-    echo "▶ Waiting for tunnel to connect (up to ${AUTH_TIMEOUT}s)..."
-    
-    # Wait for successful connection or timeout
-    ELAPSED=0
-    while [[ $ELAPSED -lt $AUTH_TIMEOUT ]]; do
-        # Check if tunnel connected successfully
-        if grep -q "Connected to" "$TUNNEL_OUTPUT" 2>/dev/null; then
-            TUNNEL_CONNECTED=true
+# Process tunnel output line by line
+while IFS= read -r line || [[ -n "$line" ]]; do
+    # Check for device code
+    if [[ -z "$DEVICE_CODE" ]]; then
+        CODE=$(echo "$line" | grep -oE "[A-Z0-9]{4}-[A-Z0-9]{4}" || true)
+        if [[ -n "$CODE" ]]; then
+            DEVICE_CODE="$CODE"
             echo ""
-            echo "✅ Authentication successful! Tunnel connected."
-            break
+            echo "╔════════════════════════════════════════════════════════════════╗"
+            echo "║                                                                ║"
+            echo "║   GitHub Device Code:  $DEVICE_CODE                               ║"
+            echo "║                                                                ║"
+            echo "║   Open: https://github.com/login/device                        ║"
+            echo "║                                                                ║"
+            echo "╚════════════════════════════════════════════════════════════════╝"
+            echo ""
+            echo "  Please authenticate in your browser with the code above."
+            echo ""
+            echo "▶ Waiting for tunnel to connect (up to ${AUTH_TIMEOUT}s)..."
         fi
-        
-        # Check if tunnel process died
-        if ! kill -0 $TUNNEL_PID 2>/dev/null; then
-            break
-        fi
-        
-        # Progress indicator
+    fi
+    
+    # Check for successful connection
+    if echo "$line" | grep -q "Connected to"; then
+        TUNNEL_CONNECTED=true
+        echo ""
+        echo "✅ Authentication successful! Tunnel connected."
+        break
+    fi
+    
+    # Check timeout
+    CURRENT_TIME=$(date +%s)
+    ELAPSED=$((CURRENT_TIME - START_TIME))
+    if [[ $ELAPSED -ge $AUTH_TIMEOUT ]]; then
+        echo ""
+        echo "⚠️  Timeout waiting for authentication."
+        break
+    fi
+    
+    # Progress indicator (only after code is shown)
+    if [[ -n "$DEVICE_CODE" ]]; then
         printf "\\r  Connecting... %ds / %ds " "$ELAPSED" "$AUTH_TIMEOUT"
-        
-        sleep 2
-        ELAPSED=$((ELAPSED + 2))
-    done
-    echo ""
-else
-    echo "⚠️  Could not retrieve Device Code. Check output:"
-    cat "$TUNNEL_OUTPUT"
-fi
+    fi
+done < "$TUNNEL_FIFO"
 
-# Stop the foreground tunnel process
+echo ""
+
+# Cleanup
 kill $TUNNEL_PID 2>/dev/null || true
 wait $TUNNEL_PID 2>/dev/null || true
-rm -f "$TUNNEL_OUTPUT"
+rm -f "$TUNNEL_FIFO"
 
-# Small delay to ensure clean handoff
 sleep 2
 
 echo ""
