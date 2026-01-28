@@ -261,6 +261,10 @@ else
     sudo systemctl status code-tunnel.service
     exit 1
 fi
+
+echo ""
+echo "Press ENTER to close this session..."
+read -r
 '
 
 # Establish SSH connection and execute script
