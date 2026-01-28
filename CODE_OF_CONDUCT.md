@@ -33,7 +33,7 @@ Examples of unacceptable behaviour:
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behaviour may be
-reported to the maintainers at **opensource@xmv-solutions.de**.
+reported to the maintainers at **<oss@xmv.de>**.
 
 All complaints will be reviewed and investigated promptly and fairly.
 
