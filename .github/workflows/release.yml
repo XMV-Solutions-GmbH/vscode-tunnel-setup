@@ -1,0 +1,76 @@
+# GitHub Release Workflow
+# Creates a release with the setup script when a tag is pushed
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Validate script syntax
+        run: bash -n setup-vscode-tunnel.sh
+
+      - name: Run unit tests
+        run: |
+          if command -v bats &> /dev/null; then
+            bats tests/unit/
+          else
+            echo "BATS not installed, skipping unit tests"
+          fi
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: VS Code Tunnel Setup ${{ steps.version.outputs.VERSION }}
+          body: |
+            ## Installation
+
+            ### One-liner (recommended)
+
+            ```bash
+            curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/setup-vscode-tunnel.sh | bash -s -- <server-ip> -n <tunnel-name>
+            ```
+
+            ### Via SSH to remote server
+
+            ```bash
+            curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/setup-vscode-tunnel.sh -o setup-vscode-tunnel.sh
+            chmod +x setup-vscode-tunnel.sh
+            ./setup-vscode-tunnel.sh <user>@<host> -n <tunnel-name>
+            ```
+
+            ### Export script for manual execution
+
+            ```bash
+            curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/setup-vscode-tunnel.sh -o setup-vscode-tunnel.sh
+            chmod +x setup-vscode-tunnel.sh
+            ./setup-vscode-tunnel.sh --export -n <tunnel-name> > remote-setup.sh
+            scp remote-setup.sh <user>@<host>:/tmp/
+            ssh <user>@<host> 'sudo bash /tmp/remote-setup.sh'
+            ```
+
+            ## Changes
+
+            See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for details.
+          files: |
+            setup-vscode-tunnel.sh
+          draft: false
+          prerelease: false
+          generate_release_notes: true

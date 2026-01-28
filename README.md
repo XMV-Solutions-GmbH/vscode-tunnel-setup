@@ -59,19 +59,25 @@ After setup, connect via:
 
 ## Installation
 
-### Option 1: Clone the repository
+### Option 1: One-liner (recommended)
+
+```bash
+curl -fsSL https://github.com/XMV-Solutions-GmbH/vscode-tunnel-setup/releases/latest/download/setup-vscode-tunnel.sh | bash -s -- <server-ip> -n <tunnel-name>
+```
+
+### Option 2: Download from latest release
+
+```bash
+curl -fsSL https://github.com/XMV-Solutions-GmbH/vscode-tunnel-setup/releases/latest/download/setup-vscode-tunnel.sh -o setup-vscode-tunnel.sh
+chmod +x setup-vscode-tunnel.sh
+./setup-vscode-tunnel.sh <server-ip> -n <tunnel-name>
+```
+
+### Option 3: Clone the repository
 
 ```bash
 git clone https://github.com/XMV-Solutions-GmbH/vscode-tunnel-setup.git
 cd vscode-tunnel-setup
-./setup-vscode-tunnel.sh <server-ip> -n <tunnel-name>
-```
-
-### Option 2: Download the script directly
-
-```bash
-curl -O https://raw.githubusercontent.com/XMV-Solutions-GmbH/vscode-tunnel-setup/main/setup-vscode-tunnel.sh
-chmod +x setup-vscode-tunnel.sh
 ./setup-vscode-tunnel.sh <server-ip> -n <tunnel-name>
 ```
 

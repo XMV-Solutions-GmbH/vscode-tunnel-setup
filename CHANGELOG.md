@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Service-based authentication: Device code is now read from systemd journal instead of manual CLI execution
+- Improved box formatting for dynamic content display
+- Added `--export` mode to generate remote script for manual deployment
+- Added `--export-script` mode to output the script generator function
+- GitHub Release workflow with curl-pipe-bash installation support
+
+### Fixed
+
+- Box formatting no longer has misaligned borders with dynamic content
+
 ## [1.0.0] - 2026-01-28
 
 ### Added
