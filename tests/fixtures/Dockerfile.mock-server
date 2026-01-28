@@ -2,7 +2,7 @@
 # Mock Server for VS Code Tunnel Setup Script E2E Tests
 # Provides an Alpine Linux environment with SSH and systemd simulation
 
-FROM alpine:3.19
+FROM alpine:3.23
 
 # Install required packages
 RUN apk add --no-cache \
