@@ -679,11 +679,52 @@ echo ""
 # Generate the remote script with the target user
 REMOTE_SCRIPT=$(generate_remote_script "$MACHINE_NAME" "$SSH_USER")
 
+# -----------------------------------------------------------------------------
+# Background job: Poll for device code and open browser + clipboard locally
+# -----------------------------------------------------------------------------
+(
+    sleep 8  # Wait for service to start
+    
+    for _ in {1..30}; do
+        # Fetch device code from server
+        DEVICE_CODE=$(ssh_cmd "$SSH_USER" "$SERVER_IP" "journalctl -u code-tunnel --no-pager -n 50 2>/dev/null | grep -o '[A-Z0-9]\{4\}-[A-Z0-9]\{4\}' | tail -1" 2>/dev/null)
+        
+        if [[ -n "$DEVICE_CODE" && "$DEVICE_CODE" =~ ^[A-Z0-9]{4}-[A-Z0-9]{4}$ ]]; then
+            # Copy to clipboard (macOS)
+            if command -v pbcopy &>/dev/null; then
+                echo -n "$DEVICE_CODE" | pbcopy
+            # Copy to clipboard (Linux with xclip)
+            elif command -v xclip &>/dev/null; then
+                echo -n "$DEVICE_CODE" | xclip -selection clipboard
+            # Copy to clipboard (Linux with xsel)
+            elif command -v xsel &>/dev/null; then
+                echo -n "$DEVICE_CODE" | xsel --clipboard --input
+            fi
+            
+            # Open browser (macOS)
+            if command -v open &>/dev/null; then
+                open "https://github.com/login/device"
+            # Open browser (Linux)
+            elif command -v xdg-open &>/dev/null; then
+                xdg-open "https://github.com/login/device" &>/dev/null
+            fi
+            
+            break
+        fi
+        
+        sleep 2
+    done
+) &
+DEVICE_CODE_PID=$!
+
 # Establish SSH connection and execute script
 echo -e "${GREEN}🔗 Connecting to $SSH_USER@$SERVER_IP...${NC}"
 echo ""
 
 ssh_cmd_tty "$SSH_USER" "$SERVER_IP" "$REMOTE_SCRIPT"
+
+# Clean up background job if still running
+kill $DEVICE_CODE_PID 2>/dev/null || true
 
 echo ""
 echo -e "${GREEN}╔════════════════════════════════════════════════════════════════╗${NC}"
