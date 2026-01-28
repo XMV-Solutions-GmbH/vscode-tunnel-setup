@@ -1,5 +1,18 @@
 #!/bin/bash
 # SPDX-License-Identifier: MIT OR Apache-2.0
+# =============================================================================
+# VS Code Tunnel Setup Script
+# =============================================================================
+# Sets up VS Code CLI and systemd tunnel service on a remote server via SSH.
+# Can also export the remote script for manual execution or testing.
+#
+# Usage:
+#   ./setup-vscode-tunnel.sh <server-ip> [-u <username>] [-n <machine-name>]
+#   ./setup-vscode-tunnel.sh --export [-n <machine-name>]
+#   ./setup-vscode-tunnel.sh --export-script
+#
+# =============================================================================
+
 set -e
 
 # Colours for output
@@ -8,27 +21,37 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
+BOLD='\033[1m'
 NC='\033[0m' # No Colour
 
 # Default values
 SSH_USER="root"
 SERVER_IP=""
 MACHINE_NAME=""
+EXPORT_MODE=false
+EXPORT_SCRIPT_ONLY=false
 
 # Display help
 show_help() {
     echo "Usage: $0 <server-ip> [-u <username>] [-n <machine-name>]"
+    echo "       $0 --export [-n <machine-name>]"
+    echo "       $0 --export-script"
     echo ""
     echo "Options:"
-    echo "  <server-ip>       IP address of the server (required)"
+    echo "  <server-ip>       IP address of the server (required for SSH mode)"
     echo "  -u <username>     SSH username (default: root)"
     echo "  -n <machine-name> Name for the VS Code Tunnel instance"
-    echo "  -h                Display this help message"
+    echo "  --export          Export the remote script with machine name for copy/paste"
+    echo "  --export-script   Export only the core script function (for testing)"
+    echo "  -h, --help        Display this help message"
     echo ""
     echo "Examples:"
     echo "  $0 192.168.1.100"
     echo "  $0 192.168.1.100 -u admin"
     echo "  $0 192.168.1.100 -u admin -n my-server"
+    echo "  $0 --export -n my-server | ssh user@host bash"
+    echo "  $0 --export-script  # For integration testing"
     exit 0
 }
 
@@ -37,29 +60,63 @@ if [[ $# -lt 1 ]]; then
     show_help
 fi
 
+# Check for --export and --export-script first
+for arg in "$@"; do
+    case "$arg" in
+        --export)
+            EXPORT_MODE=true
+            ;;
+        --export-script)
+            EXPORT_SCRIPT_ONLY=true
+            ;;
+        --help)
+            show_help
+            ;;
+    esac
+done
+
 # First argument is the IP (if it doesn't start with -)
 if [[ ! "$1" =~ ^- ]]; then
     SERVER_IP="$1"
     shift
 fi
 
-while getopts "u:n:h" opt; do
+while getopts "u:n:h-:" opt; do
     case $opt in
         u) SSH_USER="$OPTARG" ;;
         n) MACHINE_NAME="$OPTARG" ;;
         h) show_help ;;
+        -)
+            case "${OPTARG}" in
+                export|export-script|help) ;; # Already handled
+                *) show_help ;;
+            esac
+            ;;
         *) show_help ;;
     esac
 done
 
-# Validate IP address
-if [[ -z "$SERVER_IP" ]]; then
-    echo -e "${RED}Error: Server IP is required${NC}"
+# Validate arguments based on mode
+if [[ "$EXPORT_SCRIPT_ONLY" == "true" ]]; then
+    # Export script mode - no validation needed
+    :
+elif [[ "$EXPORT_MODE" == "true" ]]; then
+    # Export mode - only need machine name
+    if [[ -z "$MACHINE_NAME" ]]; then
+        echo -e "${YELLOW}Please enter a name for this VS Code Tunnel instance:${NC}" >&2
+        read -r MACHINE_NAME
+        if [[ -z "$MACHINE_NAME" ]]; then
+            echo -e "${RED}Error: Machine name is required${NC}" >&2
+            exit 1
+        fi
+    fi
+elif [[ -z "$SERVER_IP" ]]; then
+    echo -e "${RED}Error: Server IP is required (or use --export mode)${NC}"
     show_help
 fi
 
-# Prompt for machine name if not provided
-if [[ -z "$MACHINE_NAME" ]]; then
+# Prompt for machine name if not provided (SSH mode)
+if [[ "$EXPORT_MODE" != "true" && "$EXPORT_SCRIPT_ONLY" != "true" && -z "$MACHINE_NAME" ]]; then
     echo -e "${YELLOW}Please enter a name for this VS Code Tunnel instance:${NC}"
     read -r MACHINE_NAME
     if [[ -z "$MACHINE_NAME" ]]; then
@@ -68,87 +125,146 @@ if [[ -z "$MACHINE_NAME" ]]; then
     fi
 fi
 
-echo -e "${BLUE}========================================${NC}"
-echo -e "${BLUE}VS Code Tunnel Setup${NC}"
-echo -e "${BLUE}========================================${NC}"
-echo -e "${CYAN}Server:${NC} $SSH_USER@$SERVER_IP"
-echo -e "${CYAN}Maschinenname:${NC} $MACHINE_NAME"
-echo -e "${BLUE}========================================${NC}"
-echo ""
+# =============================================================================
+# Remote Script Definition
+# =============================================================================
+# This is the core script that runs on the target machine.
+# It can be executed via SSH, exported for copy/paste, or used by tests.
+# =============================================================================
 
-# Remote script to be executed on the server
-# shellcheck disable=SC2016
-REMOTE_SCRIPT='
+generate_remote_script() {
+    local machine_name="$1"
+    
+    cat << 'REMOTE_SCRIPT_EOF'
+#!/bin/bash
+# =============================================================================
+# VS Code Tunnel Remote Setup Script
+# =============================================================================
+# This script is designed to be executed on the target machine.
+# It installs VS Code CLI and configures the systemd tunnel service.
+# =============================================================================
 
-MACHINE_NAME="'"$MACHINE_NAME"'"
+set -e
 
-echo "🔍 Checking system..."
+REMOTE_SCRIPT_EOF
 
-# Detect architecture
+    # Inject machine name variable
+    echo "MACHINE_NAME=\"$machine_name\""
+    echo ""
+    
+    # The rest of the script (static part)
+    cat << 'REMOTE_SCRIPT_EOF'
+
+# -----------------------------------------------------------------------------
+# Helper Functions
+# -----------------------------------------------------------------------------
+
+print_step() {
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  $1"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+}
+
+print_success() {
+    echo "✓ $1"
+}
+
+print_error() {
+    echo "✗ $1"
+}
+
+print_info() {
+    echo "  $1"
+}
+
+# -----------------------------------------------------------------------------
+# Step 1: Detect Architecture
+# -----------------------------------------------------------------------------
+
+print_step "Detecting System Architecture"
+
 ARCH=$(uname -m)
 case $ARCH in
-    x86_64)  ARCH_NAME="x64" ;;
-    aarch64) ARCH_NAME="arm64" ;;
-    armv7l)  ARCH_NAME="armhf" ;;
-    *)       echo "❌ Unsupported architecture: $ARCH"; exit 1 ;;
+    x86_64)
+        ARCH_NAME="x64"
+        ;;
+    aarch64)
+        ARCH_NAME="arm64"
+        ;;
+    armv7l)
+        ARCH_NAME="armhf"
+        ;;
+    *)
+        print_error "Unsupported architecture: $ARCH"
+        exit 1
+        ;;
 esac
 
-echo "📦 Architecture: $ARCH_NAME"
+print_success "Architecture: $ARCH → $ARCH_NAME"
 
-# Check if VS Code CLI is already installed
+# -----------------------------------------------------------------------------
+# Step 2: Install VS Code CLI
+# -----------------------------------------------------------------------------
+
+print_step "Installing VS Code CLI"
+
 VSCODE_CLI="/usr/local/bin/code"
-INSTALL_NEEDED=false
 
 if [[ -f "$VSCODE_CLI" ]]; then
-    echo "✅ VS Code CLI already installed"
+    CLI_VERSION=$("$VSCODE_CLI" --version 2>/dev/null | head -1 || echo "unknown")
+    print_success "VS Code CLI already installed: $CLI_VERSION"
 else
-    INSTALL_NEEDED=true
-fi
-
-if $INSTALL_NEEDED; then
-    echo "📥 Installing VS Code CLI..."
+    print_info "Downloading VS Code CLI..."
     
-    # Temporary directory
-    TMP_DIR=$(mktemp -d)
-    cd "$TMP_DIR"
-    
-    # Download
     DOWNLOAD_URL="https://code.visualstudio.com/sha/download?build=stable&os=cli-alpine-$ARCH_NAME"
-    echo "📥 Downloading from: $DOWNLOAD_URL"
+    TMP_DIR=$(mktemp -d)
+    
+    cd "$TMP_DIR"
     
     if command -v curl &> /dev/null; then
         curl -L "$DOWNLOAD_URL" -o vscode_cli.tar.gz
     elif command -v wget &> /dev/null; then
         wget -O vscode_cli.tar.gz "$DOWNLOAD_URL"
     else
-        echo "❌ Neither curl nor wget available"
+        print_error "Neither curl nor wget available"
         exit 1
     fi
     
-    # Extract
+    print_info "Extracting..."
     tar -xzf vscode_cli.tar.gz
     
-    # Install
-    sudo mv code /usr/local/bin/code 2>/dev/null || mv code /usr/local/bin/code
+    print_info "Installing to /usr/local/bin/code..."
+    if [[ -w /usr/local/bin ]]; then
+        mv code /usr/local/bin/code
+    else
+        sudo mv code /usr/local/bin/code
+    fi
     chmod +x /usr/local/bin/code
     
     # Clean up
     cd /
     rm -rf "$TMP_DIR"
     
-    echo "✅ VS Code CLI installed"
+    CLI_VERSION=$(/usr/local/bin/code --version 2>/dev/null | head -1 || echo "installed")
+    print_success "VS Code CLI installed: $CLI_VERSION"
 fi
 
-# Check if systemd service exists
+# -----------------------------------------------------------------------------
+# Step 3: Create Systemd Service
+# -----------------------------------------------------------------------------
+
+print_step "Configuring Systemd Service"
+
 SERVICE_FILE="/etc/systemd/system/code-tunnel.service"
 SERVICE_NEEDED=false
 
 if [[ -f "$SERVICE_FILE" ]]; then
-    # Check if the name matches
     if grep -q "name $MACHINE_NAME" "$SERVICE_FILE"; then
-        echo "✅ Systemd service already configured"
+        print_success "Systemd service already configured for '$MACHINE_NAME'"
     else
-        echo "⚠️  Service exists with different name, updating..."
+        print_info "Service exists with different name, updating..."
         SERVICE_NEEDED=true
     fi
 else
@@ -156,11 +272,9 @@ else
 fi
 
 if $SERVICE_NEEDED; then
-    echo "🔧 Creating systemd service..."
+    print_info "Creating service file..."
     
-    # Create service file
-    sudo tee "$SERVICE_FILE" > /dev/null << SERVICEEOF
-[Unit]
+    SERVICE_CONTENT="[Unit]
 Description=VS Code Tunnel
 After=network.target
 
@@ -173,90 +287,183 @@ RestartSec=10
 Environment=HOME=/root
 
 [Install]
-WantedBy=multi-user.target
-SERVICEEOF
+WantedBy=multi-user.target"
 
-    # Reload systemd
-    sudo systemctl daemon-reload
-    sudo systemctl enable code-tunnel.service
+    if [[ -w /etc/systemd/system ]]; then
+        echo "$SERVICE_CONTENT" > "$SERVICE_FILE"
+    else
+        echo "$SERVICE_CONTENT" | sudo tee "$SERVICE_FILE" > /dev/null
+    fi
     
-    echo "✅ Systemd service created and enabled"
+    print_info "Reloading systemd..."
+    if command -v sudo &> /dev/null && [[ $EUID -ne 0 ]]; then
+        sudo systemctl daemon-reload
+        sudo systemctl enable code-tunnel.service
+    else
+        systemctl daemon-reload
+        systemctl enable code-tunnel.service
+    fi
+    
+    print_success "Systemd service created and enabled"
 fi
 
-# Check if already authenticated
-echo ""
-echo "🔐 Starting VS Code Tunnel for authentication..."
-echo ""
+# -----------------------------------------------------------------------------
+# Step 4: Start Service & GitHub Authentication
+# -----------------------------------------------------------------------------
+
+print_step "Starting Service & GitHub Authentication"
 
 # Stop any existing tunnel process
-sudo systemctl stop code-tunnel.service 2>/dev/null || true
+if command -v sudo &> /dev/null && [[ $EUID -ne 0 ]]; then
+    sudo systemctl stop code-tunnel.service 2>/dev/null || true
+else
+    systemctl stop code-tunnel.service 2>/dev/null || true
+fi
 sleep 2
 
-echo "╔════════════════════════════════════════════════════════════════╗"
-echo "║  The GitHub Device Code will appear below.                     ║"
-echo "║  Open: https://github.com/login/device                         ║"
-echo "║  Enter the code and authenticate with GitHub.                  ║"
-echo "║                                                                ║"
-echo "║  The script will continue automatically after authentication.  ║"
-echo "╚════════════════════════════════════════════════════════════════╝"
-echo ""
+# Start the service (it will request GitHub auth)
+print_info "Starting tunnel service..."
+if command -v sudo &> /dev/null && [[ $EUID -ne 0 ]]; then
+    sudo systemctl start code-tunnel.service
+else
+    systemctl start code-tunnel.service
+fi
 
-# First set GitHub as the auth provider
-/usr/local/bin/code tunnel user login --provider github || true
+sleep 3
 
-# Run tunnel and wait for successful connection (auth complete)
-# We pipe through a while loop that exits when "Connected to" is detected
-AUTH_LOG="/tmp/tunnel_auth_$$.log"
-/usr/local/bin/code tunnel --accept-server-license-terms --name "$MACHINE_NAME" 2>&1 | while IFS= read -r line; do
-    echo "$line"
-    echo "$line" >> "$AUTH_LOG"
-    # When we see "Connected to", auth is complete - kill the tunnel
-    if echo "$line" | grep -q "Connected to"; then
-        echo ""
-        echo "✅ Authentication successful! Tunnel connected."
-        echo "🔄 Stopping foreground tunnel to start as service..."
-        # Get parent PID (the code tunnel process) and kill it
-        sleep 2
-        pkill -P $$ -f "code tunnel" 2>/dev/null || true
+# Wait for device code to appear in logs
+print_info "Waiting for GitHub Device Code..."
+
+DEVICE_CODE=""
+WAIT_COUNT=0
+MAX_WAIT=60
+
+while [[ $WAIT_COUNT -lt $MAX_WAIT ]]; do
+    LOG_OUTPUT=$(journalctl -u code-tunnel --no-pager -n 50 2>/dev/null || true)
+    
+    if echo "$LOG_OUTPUT" | grep -q "use code"; then
+        DEVICE_CODE=$(echo "$LOG_OUTPUT" | grep -o '[A-Z0-9]\{4\}-[A-Z0-9]\{4\}' | tail -1)
         break
     fi
+    
+    sleep 1
+    WAIT_COUNT=$((WAIT_COUNT + 1))
 done
-rm -f "$AUTH_LOG"
 
-echo ""
-
-echo ""
-echo "=========================================="
-echo "🚀 Starting tunnel as service..."
-echo "=========================================="
-
-# Start service
-sudo systemctl start code-tunnel.service
-
-# Check status
-sleep 3
-if sudo systemctl is-active --quiet code-tunnel.service; then
+if [[ -n "$DEVICE_CODE" ]]; then
     echo ""
-    echo "✅ VS Code Tunnel is running!"
-    echo ""
-    echo "=========================================="
-    echo "🎉 COMPLETE!"
-    echo "=========================================="
-    echo ""
-    echo "Open VS Code and connect via:"
-    echo "  1. Remote Explorer → Tunnels"
-    echo "  2. Or: vscode.dev/tunnel/$MACHINE_NAME"
+    echo "╔════════════════════════════════════════════════════════════════╗"
+    echo "║                                                                ║"
+    echo "║   GitHub Device Code:  $DEVICE_CODE                            ║"
+    echo "║                                                                ║"
+    echo "║   Open: https://github.com/login/device                        ║"
+    echo "║   Enter the code and authenticate with GitHub.                 ║"
+    echo "║                                                                ║"
+    echo "║   Waiting for authentication (up to 180 seconds)...            ║"
+    echo "║                                                                ║"
+    echo "╚════════════════════════════════════════════════════════════════╝"
     echo ""
 else
-    echo "❌ Service could not be started"
-    sudo systemctl status code-tunnel.service
+    print_error "Could not detect Device Code from service logs"
+    print_info "Check logs: journalctl -u code-tunnel -f"
+    exit 1
+fi
+
+# Wait for tunnel to connect (authentication complete)
+TUNNEL_CONNECTED=false
+WAIT_COUNT=0
+MAX_WAIT=180
+
+while [[ $WAIT_COUNT -lt $MAX_WAIT ]]; do
+    LOG_OUTPUT=$(journalctl -u code-tunnel --no-pager -n 100 2>/dev/null || true)
+    
+    # Check for successful connection
+    if echo "$LOG_OUTPUT" | grep -qi "open this link\|connected\|tunnel/"; then
+        TUNNEL_CONNECTED=true
+        break
+    fi
+    
+    sleep 2
+    WAIT_COUNT=$((WAIT_COUNT + 2))
+    printf "\r  Waiting for authentication... %ds / %ds " "$WAIT_COUNT" "$MAX_WAIT"
+done
+
+echo ""
+
+if [[ "$TUNNEL_CONNECTED" != "true" ]]; then
+    print_error "Timeout waiting for tunnel connection"
+    print_info "Check logs: journalctl -u code-tunnel -f"
+    exit 1
+fi
+
+# -----------------------------------------------------------------------------
+# Step 5: Verify Service Running
+# -----------------------------------------------------------------------------
+
+print_step "Verifying Tunnel Service"
+
+sleep 3
+
+# Check status
+if systemctl is-active --quiet code-tunnel.service; then
+    echo ""
+    echo "╔════════════════════════════════════════════════════════════════╗"
+    echo "║                                                                ║"
+    echo "║  🎉 VS Code Tunnel is running!                                 ║"
+    echo "║                                                                ║"
+    echo "║  Connect via:                                                  ║"
+    echo "║    • VS Code: Remote Explorer → Tunnels → $MACHINE_NAME"
+    echo "║    • Browser: https://vscode.dev/tunnel/$MACHINE_NAME"
+    echo "║                                                                ║"
+    echo "╚════════════════════════════════════════════════════════════════╝"
+    echo ""
+    print_success "Setup complete!"
+else
+    print_error "Service could not be started"
+    systemctl status code-tunnel.service --no-pager || true
     exit 1
 fi
 
 echo ""
 echo "Press ENTER to close this session..."
 read -r
-'
+REMOTE_SCRIPT_EOF
+}
+
+# =============================================================================
+# Export Script Only Mode (for testing)
+# =============================================================================
+
+if [[ "$EXPORT_SCRIPT_ONLY" == "true" ]]; then
+    # Output the generate_remote_script function itself for sourcing
+    declare -f generate_remote_script
+    exit 0
+fi
+
+# =============================================================================
+# Export Mode
+# =============================================================================
+
+if [[ "$EXPORT_MODE" == "true" ]]; then
+    # Output the complete remote script for copy/paste or piping
+    generate_remote_script "$MACHINE_NAME"
+    exit 0
+fi
+
+# =============================================================================
+# SSH Mode (default)
+# =============================================================================
+
+echo -e "${BLUE}╔════════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${BLUE}║${NC}  ${BOLD}VS Code Tunnel Setup${NC}"
+echo -e "${BLUE}╚════════════════════════════════════════════════════════════════╝${NC}"
+echo ""
+echo -e "  Server:       ${CYAN}$SSH_USER@$SERVER_IP${NC}"
+echo -e "  Tunnel name:  ${CYAN}$MACHINE_NAME${NC}"
+echo ""
+
+# Generate the remote script
+REMOTE_SCRIPT=$(generate_remote_script "$MACHINE_NAME")
 
 # Establish SSH connection and execute script
 echo -e "${GREEN}🔗 Connecting to $SSH_USER@$SERVER_IP...${NC}"
@@ -265,13 +472,13 @@ echo ""
 ssh -t "$SSH_USER@$SERVER_IP" "$REMOTE_SCRIPT"
 
 echo ""
-echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}✅ Setup complete!${NC}"
-echo -e "${GREEN}========================================${NC}"
+echo -e "${GREEN}╔════════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${GREEN}║${NC}  ${BOLD}✅ Setup complete!${NC}"
+echo -e "${GREEN}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
-echo -e "${CYAN}Connect via:${NC}"
-echo -e "  ${YELLOW}https://vscode.dev/tunnel/$MACHINE_NAME${NC}"
+echo -e "  Connect via:"
+echo -e "    ${CYAN}https://vscode.dev/tunnel/$MACHINE_NAME${NC}"
 echo ""
-echo -e "${CYAN}Or in VS Code Desktop:${NC}"
-echo -e "  Remote Explorer → Tunnels → $MACHINE_NAME"
+echo -e "  Or in VS Code Desktop:"
+echo -e "    Remote Explorer → Tunnels → ${CYAN}$MACHINE_NAME${NC}"
 echo ""
