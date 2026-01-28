@@ -194,74 +194,43 @@ sudo systemctl stop code-tunnel.service 2>/dev/null || true
 pkill -f "code tunnel" 2>/dev/null || true
 sleep 2
 
-echo "⚠ Waiting for GitHub Device Code..."
+echo "╔════════════════════════════════════════════════════════════════╗"
+echo "║  Please wait for the GitHub Device Code to appear below...     ║"
+echo "║  Then open: https://github.com/login/device                    ║"
+echo "║  Enter the code and authenticate with GitHub.                  ║"
+echo "║                                                                ║"
+echo "║  The script will continue automatically after authentication.  ║"
+echo "║  Timeout: 180 seconds                                          ║"
+echo "╚════════════════════════════════════════════════════════════════╝"
 echo ""
 
-# Create named pipe for tunnel output
-TUNNEL_FIFO="/tmp/tunnel_output_$$"
-mkfifo "$TUNNEL_FIFO"
+# Run tunnel in foreground with timeout
+# Use script to capture output while displaying it (works better over SSH)
+TUNNEL_LOG="/tmp/tunnel_auth_$$.log"
 
-# Start tunnel, write to FIFO
-/usr/local/bin/code tunnel --accept-server-license-terms --name "$MACHINE_NAME" > "$TUNNEL_FIFO" 2>&1 &
+# Run tunnel with timeout, capture output
+timeout 180 /usr/local/bin/code tunnel --accept-server-license-terms --name "$MACHINE_NAME" 2>&1 | tee "$TUNNEL_LOG" &
 TUNNEL_PID=$!
 
-# Read from FIFO and process output
-AUTH_TIMEOUT=180
-DEVICE_CODE=""
-TUNNEL_CONNECTED=false
-START_TIME=$(date +%s)
-
-# Process tunnel output line by line
-while IFS= read -r line || [[ -n "$line" ]]; do
-    # Check for device code
-    if [[ -z "$DEVICE_CODE" ]]; then
-        CODE=$(echo "$line" | grep -oE "[A-Z0-9]{4}-[A-Z0-9]{4}" || true)
-        if [[ -n "$CODE" ]]; then
-            DEVICE_CODE="$CODE"
-            echo ""
-            echo "╔════════════════════════════════════════════════════════════════╗"
-            echo "║                                                                ║"
-            echo "║   GitHub Device Code:  $DEVICE_CODE                               ║"
-            echo "║                                                                ║"
-            echo "║   Open: https://github.com/login/device                        ║"
-            echo "║                                                                ║"
-            echo "╚════════════════════════════════════════════════════════════════╝"
-            echo ""
-            echo "  Please authenticate in your browser with the code above."
-            echo ""
-            echo "▶ Waiting for tunnel to connect (up to ${AUTH_TIMEOUT}s)..."
-        fi
-    fi
-    
-    # Check for successful connection
-    if echo "$line" | grep -q "Connected to"; then
-        TUNNEL_CONNECTED=true
+# Wait for "Connected to" message or timeout
+CONNECTED=false
+for i in $(seq 1 180); do
+    sleep 1
+    if grep -q "Connected to" "$TUNNEL_LOG" 2>/dev/null; then
+        CONNECTED=true
         echo ""
         echo "✅ Authentication successful! Tunnel connected."
         break
     fi
-    
-    # Check timeout
-    CURRENT_TIME=$(date +%s)
-    ELAPSED=$((CURRENT_TIME - START_TIME))
-    if [[ $ELAPSED -ge $AUTH_TIMEOUT ]]; then
-        echo ""
-        echo "⚠️  Timeout waiting for authentication."
+    if ! kill -0 $TUNNEL_PID 2>/dev/null; then
         break
     fi
-    
-    # Progress indicator (only after code is shown)
-    if [[ -n "$DEVICE_CODE" ]]; then
-        printf "\\r  Connecting... %ds / %ds " "$ELAPSED" "$AUTH_TIMEOUT"
-    fi
-done < "$TUNNEL_FIFO"
-
-echo ""
+done
 
 # Cleanup
 kill $TUNNEL_PID 2>/dev/null || true
 wait $TUNNEL_PID 2>/dev/null || true
-rm -f "$TUNNEL_FIFO"
+rm -f "$TUNNEL_LOG"
 
 sleep 2
 
