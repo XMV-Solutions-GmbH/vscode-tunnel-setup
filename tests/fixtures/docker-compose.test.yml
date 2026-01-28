@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
 # Docker Compose configuration for VS Code Tunnel Setup Script E2E tests
 # Orchestrates the mock server container for testing
 

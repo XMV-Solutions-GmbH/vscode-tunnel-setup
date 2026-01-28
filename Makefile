@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
 # Makefile for VS Code Tunnel Setup Script
 # Provides convenient targets for development and testing
 

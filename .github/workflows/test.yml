@@ -1,0 +1,128 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# GitHub Actions workflow for VS Code Tunnel Setup Script testing
+# Runs all test suites on push and pull requests
+
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - 'feature/**'
+  pull_request:
+    branches:
+      - main
+      - develop
+
+jobs:
+  # Lint shell scripts
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Install ShellCheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      
+      - name: Run ShellCheck
+        run: |
+          shellcheck setup-vscode-tunnel.sh
+          shellcheck tests/run_tests.sh
+          shellcheck tests/test_helper.bash
+          find tests/fixtures -name "*.sh" -exec shellcheck {} \;
+
+  # Unit tests - run on all platforms without Docker
+  unit-tests:
+    name: test-unit
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Install bats-core (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bats
+      
+      - name: Install bats-core (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install bats-core
+      
+      - name: Run unit tests
+        run: |
+          chmod +x tests/run_tests.sh
+          ./tests/run_tests.sh unit
+      
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results-${{ matrix.os }}
+          path: tests/reports/
+
+  # Integration and E2E tests - run on Linux with Docker
+  integration-tests:
+    name: test-integration
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Install bats-core
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bats sshpass
+      
+      - name: Build Docker test image
+        run: |
+          docker build -t vscode-tunnel-test -f tests/fixtures/Dockerfile.mock-server tests/fixtures/
+      
+      - name: Run integration tests
+        run: |
+          chmod +x tests/run_tests.sh
+          ./tests/run_tests.sh integration
+      
+      - name: Run E2E tests
+        run: |
+          ./tests/run_tests.sh e2e
+      
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results
+          path: tests/reports/
+
+  # All tests passed gate
+  test-gate:
+    name: All Tests Passed
+    runs-on: ubuntu-latest
+    needs: [lint, unit-tests, integration-tests]
+    if: always()
+    
+    steps:
+      - name: Check test results
+        run: |
+          if [[ "${{ needs.unit-tests.result }}" != "success" ]]; then
+            echo "Unit tests failed"
+            exit 1
+          fi
+          if [[ "${{ needs.integration-tests.result }}" != "success" ]]; then
+            echo "Integration tests failed"
+            exit 1
+          fi
+          if [[ "${{ needs.lint.result }}" != "success" ]]; then
+            echo "Lint failed"
+            exit 1
+          fi
+          echo "All tests passed!"

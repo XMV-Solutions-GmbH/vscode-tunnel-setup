@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# SPDX-License-Identifier: MIT OR Apache-2.0
 # Integration Tests for VS Code Tunnel Setup Script - Remote Script Logic
 # Tests architecture detection, CLI installation, and service management
 

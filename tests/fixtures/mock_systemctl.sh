@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT OR Apache-2.0
 # Mock systemctl command for Alpine Linux testing
 # Simulates basic systemd service management
 

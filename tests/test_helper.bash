@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT OR Apache-2.0
 # Test helper functions for VS Code Tunnel Setup Script tests
 # Provides common utilities, setup, and teardown functions
 

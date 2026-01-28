@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# SPDX-License-Identifier: MIT OR Apache-2.0
 # Unit Tests for VS Code Tunnel Setup Script - Argument Parsing
 # Tests command-line argument parsing without network or Docker dependencies
 
