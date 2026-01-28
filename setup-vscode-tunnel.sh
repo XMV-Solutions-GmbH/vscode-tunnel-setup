@@ -188,12 +188,8 @@ echo ""
 echo "🔐 Starting VS Code Tunnel for authentication..."
 echo ""
 
-# Stop any existing tunnel process (use pgrep/kill to avoid killing SSH session)
+# Stop any existing tunnel process
 sudo systemctl stop code-tunnel.service 2>/dev/null || true
-# Only kill actual code tunnel processes, not SSH sessions containing "code tunnel" in args
-for pid in $(pgrep -f "/usr/local/bin/code tunnel" 2>/dev/null); do
-    kill "$pid" 2>/dev/null || true
-done
 sleep 2
 
 echo "╔════════════════════════════════════════════════════════════════╗"
