@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT OR Apache-2.0
 # =============================================================================
 # Docker-based Real Integration Test
 # =============================================================================
@@ -258,70 +259,85 @@ CONTAINER_ID=$(docker ps -q -f name="$CONTAINER_NAME")
 print_info "Container ID: $CONTAINER_ID"
 
 # =============================================================================
-# Step 3: Install VS Code CLI
+# Step 3: Install VS Code CLI & Create Service (using production script)
 # =============================================================================
 
-print_step "Install VS Code CLI"
+print_step "Install VS Code CLI & Create Service (via production script)"
 
-print_highlight "Detecting architecture..."
+print_highlight "Copying setup script to container..."
 
-ARCH=$(docker_exec uname -m)
-case $ARCH in
-    x86_64)  ARCH_NAME="x64" ;;
-    aarch64) ARCH_NAME="arm64" ;;
-    armv7l)  ARCH_NAME="armhf" ;;
-    *)
-        print_error "Unsupported architecture: $ARCH"
-        exit 1
-        ;;
-esac
+# Copy the production script into the container
+docker cp "$PROJECT_ROOT/setup-vscode-tunnel.sh" "$CONTAINER_NAME:/tmp/setup-vscode-tunnel.sh"
+docker_exec chmod +x /tmp/setup-vscode-tunnel.sh
 
-print_info "Architecture: $ARCH → $ARCH_NAME"
+print_highlight "Exporting remote script from production code..."
 
-print_highlight "Downloading VS Code CLI..."
+# Export the remote script from the production setup-vscode-tunnel.sh
+# This is the EXACT code that would run on a real server via SSH!
+docker_exec bash -c "/tmp/setup-vscode-tunnel.sh --export -n '$TUNNEL_NAME'" > /tmp/tunnel_setup_$$.sh
+docker cp /tmp/tunnel_setup_$$.sh "$CONTAINER_NAME:/tmp/tunnel_setup.sh"
+docker_exec chmod +x /tmp/tunnel_setup.sh
+rm -f /tmp/tunnel_setup_$$.sh
 
-docker_exec bash -c "
-    cd /tmp
-    curl -L 'https://code.visualstudio.com/sha/download?build=stable&os=cli-alpine-$ARCH_NAME' -o vscode_cli.tar.gz
-    tar -xzf vscode_cli.tar.gz
-    mv code /usr/local/bin/code
-    chmod +x /usr/local/bin/code
-    rm vscode_cli.tar.gz
-"
+# Verify export worked
+if docker_exec test -f /tmp/tunnel_setup.sh; then
+    SCRIPT_LINES=$(docker_exec bash -c 'wc -l < /tmp/tunnel_setup.sh')
+    print_success "Production script exported: $SCRIPT_LINES lines"
+else
+    print_error "Failed to export production script"
+    exit 1
+fi
 
-# Verify installation
+print_highlight "Running production script (installation part only)..."
+
+# Run ONLY the installation part of the production script
+# We use sed to extract everything up to "Step 4" (GitHub Auth)
+# This ensures we're testing the EXACT same installation code as production
+docker_exec bash -c '
+    # Extract just the installation parts (Steps 1-3) from the production script
+    sed -n "1,/Step 4:/p" /tmp/tunnel_setup.sh | head -n -3 > /tmp/install_only.sh
+    chmod +x /tmp/install_only.sh
+    bash /tmp/install_only.sh
+'
+
+# Verify CLI installation
 CLI_VERSION=$(docker_exec /usr/local/bin/code --version 2>/dev/null | head -1)
 print_success "VS Code CLI installed: $CLI_VERSION"
 
 # =============================================================================
-# Step 4: Create Systemd Service
+# Step 4: Verify Service Configuration
 # =============================================================================
 
-print_step "Create Systemd Service"
+print_step "Verify Service Configuration"
 
-print_highlight "Creating service file..."
+print_highlight "Checking service file..."
 
-docker_exec bash -c "cat > /etc/systemd/system/code-tunnel.service << 'EOF'
-[Unit]
-Description=VS Code Tunnel
-After=network.target
+# Verify service file was created correctly
+if docker_exec test -f /etc/systemd/system/code-tunnel.service; then
+    print_success "Service file exists"
+else
+    print_error "Service file not found"
+    exit 1
+fi
 
-[Service]
-Type=simple
-User=root
-ExecStart=/usr/local/bin/code tunnel --accept-server-license-terms --name $TUNNEL_NAME
-Restart=always
-RestartSec=10
-Environment=HOME=/root
+# Verify service is enabled
+if docker_exec systemctl is-enabled --quiet code-tunnel.service; then
+    print_success "Service is enabled"
+else
+    print_error "Service not enabled"
+fi
 
-[Install]
-WantedBy=multi-user.target
-EOF"
+# Verify service file content matches expected
+if docker_exec grep -q "name $TUNNEL_NAME" /etc/systemd/system/code-tunnel.service; then
+    print_success "Service configured with correct tunnel name: $TUNNEL_NAME"
+else
+    print_error "Tunnel name not found in service file"
+    docker_exec cat /etc/systemd/system/code-tunnel.service
+    exit 1
+fi
 
-print_highlight "Enabling and starting service..."
+print_highlight "Starting service..."
 
-docker_exec systemctl daemon-reload
-docker_exec systemctl enable code-tunnel.service
 docker_exec systemctl start code-tunnel.service
 
 sleep 3

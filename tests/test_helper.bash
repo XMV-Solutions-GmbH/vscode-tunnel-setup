@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT OR Apache-2.0
 # Test helper functions for VS Code Tunnel Setup Script tests
 # Provides common utilities, setup, and teardown functions
+# shellcheck disable=SC2155,SC2154
 
 # Colours for test output
 export RED='\033[0;31m'

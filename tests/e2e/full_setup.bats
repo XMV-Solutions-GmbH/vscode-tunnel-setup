@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# SPDX-License-Identifier: MIT OR Apache-2.0
 # End-to-End Tests for VS Code Tunnel Setup Script
 # Requires Docker for full system simulation
 

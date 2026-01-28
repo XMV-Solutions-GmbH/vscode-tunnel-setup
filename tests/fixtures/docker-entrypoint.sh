@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT OR Apache-2.0
 # Docker entrypoint for mock server
 # Initialises the environment and starts SSH
 
