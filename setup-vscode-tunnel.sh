@@ -79,7 +79,6 @@ echo ""
 # Remote script to be executed on the server
 # shellcheck disable=SC2016
 REMOTE_SCRIPT='
-set -e
 
 MACHINE_NAME="'"$MACHINE_NAME"'"
 
