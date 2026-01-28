@@ -214,7 +214,7 @@ ssh_cmd() {
     local opts
     opts=$(build_ssh_opts)
     
-    # shellcheck disable=SC2086
+    # shellcheck disable=SC2086,SC2029
     ssh $opts "$user@$host" "$@"
 }
 
@@ -609,13 +609,9 @@ echo ""
 # Check if user exists and handle user creation if needed
 # -----------------------------------------------------------------------------
 
-USER_EXISTS=true
-USER_CREATED=false
-
 # Test SSH connection with specified user
 echo -e "${GREEN}🔗 Testing connection as $SSH_USER@$SERVER_IP...${NC}"
 if ! ssh_test "$SSH_USER" "$SERVER_IP"; then
-    USER_EXISTS=false
     echo -e "${YELLOW}⚠ Cannot connect as '$SSH_USER'${NC}"
     
     # Only try root fallback if user is not root
@@ -700,7 +696,6 @@ USERSCRIPT
         echo "$USER_SETUP_SCRIPT" | ssh_cmd "root" "$SERVER_IP" "cat > /tmp/user_setup.sh && chmod +x /tmp/user_setup.sh"
         ssh_cmd_tty "root" "$SERVER_IP" "/tmp/user_setup.sh && rm /tmp/user_setup.sh"
         
-        USER_CREATED=true
         echo -e "${GREEN}✓ User '$SSH_USER' created and SSH keys copied${NC}"
         
         # Verify we can now connect as the new user
