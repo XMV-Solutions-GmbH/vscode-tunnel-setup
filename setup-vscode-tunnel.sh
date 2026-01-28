@@ -26,6 +26,9 @@ NC='\033[0m' # No Colour
 
 # Default values
 SSH_USER="root"
+SSH_PORT=""
+SSH_IDENTITY=""
+SSH_FORCE_HOST_KEY=false
 SERVER_IP=""
 MACHINE_NAME=""
 EXPORT_MODE=false
@@ -33,25 +36,29 @@ EXPORT_SCRIPT_ONLY=false
 
 # Display help
 show_help() {
-    echo "Usage: $0 <server-ip> [-u <username>] [-n <machine-name>]"
+    echo "Usage: $0 <server-ip> [-u <username>] [-n <machine-name>] [-p <port>] [-i <keyfile>] [-f]"
     echo "       $0 --export [-n <machine-name>] [-u <username>]"
     echo "       $0 --export-script"
     echo ""
     echo "Options:"
-    echo "  <server-ip>       IP address of the server (required for SSH mode)"
+    echo "  <server-ip>       IP address or hostname of the server (required for SSH mode)"
     echo "  -u <username>     SSH username and service user (default: root)"
     echo "                    If user doesn't exist, script will connect as root,"
     echo "                    create the user, and copy SSH keys automatically."
     echo "  -n <machine-name> Name for the VS Code Tunnel instance"
+    echo "  -p <port>         SSH port (default: 22)"
+    echo "  -i <keyfile>      Path to SSH private key file"
+    echo "  -f                Force: skip host key verification (useful for reinstalled servers)"
     echo "  --export          Export the remote script with machine name for copy/paste"
     echo "  --export-script   Export only the core script function (for testing)"
     echo "  -h, --help        Display this help message"
     echo ""
     echo "Examples:"
     echo "  $0 192.168.1.100 -n my-server"
-    echo "  $0 192.168.1.100 -u vscode -n my-server  # Creates user 'vscode' if needed"
-    echo "  $0 --export -n my-server | ssh user@host bash"
-    echo "  $0 --export -u vscode -n my-server       # Service runs as 'vscode' user"
+    echo "  $0 192.168.1.100 -u vscode -n my-server     # Creates user 'vscode' if needed"
+    echo "  $0 server.example.com -p 2222 -n my-server  # Custom SSH port"
+    echo "  $0 server.example.com -i ~/.ssh/id_ed25519 -n my-server"
+    echo "  $0 server.example.com -f -n my-server       # Skip host key check"
     exit 0
 }
 
@@ -81,10 +88,13 @@ if [[ ! "$1" =~ ^- ]]; then
     shift
 fi
 
-while getopts "u:n:h-:" opt; do
+while getopts "u:n:p:i:fh-:" opt; do
     case $opt in
         u) SSH_USER="$OPTARG" ;;
         n) MACHINE_NAME="$OPTARG" ;;
+        p) SSH_PORT="$OPTARG" ;;
+        i) SSH_IDENTITY="$OPTARG" ;;
+        f) SSH_FORCE_HOST_KEY=true ;;
         h) show_help ;;
         -)
             case "${OPTARG}" in
@@ -155,6 +165,60 @@ if [[ "$EXPORT_MODE" != "true" && "$EXPORT_SCRIPT_ONLY" != "true" && -z "$MACHIN
         exit 1
     fi
 fi
+
+# Build SSH options array
+build_ssh_opts() {
+    local opts=()
+    
+    if [[ -n "$SSH_PORT" ]]; then
+        opts+=(-p "$SSH_PORT")
+    fi
+    
+    if [[ -n "$SSH_IDENTITY" ]]; then
+        opts+=(-i "$SSH_IDENTITY")
+    fi
+    
+    if [[ "$SSH_FORCE_HOST_KEY" == "true" ]]; then
+        opts+=(-o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null")
+    fi
+    
+    echo "${opts[@]}"
+}
+
+# SSH command wrapper (non-interactive)
+ssh_cmd() {
+    local user="$1"
+    local host="$2"
+    shift 2
+    local opts
+    opts=$(build_ssh_opts)
+    
+    # shellcheck disable=SC2086
+    ssh $opts "$user@$host" "$@"
+}
+
+# SSH command wrapper (interactive with TTY)
+ssh_cmd_tty() {
+    local user="$1"
+    local host="$2"
+    shift 2
+    local opts
+    opts=$(build_ssh_opts)
+    
+    # shellcheck disable=SC2086
+    ssh -t $opts "$user@$host" "$@"
+}
+
+# SSH test command (batch mode, with timeout)
+ssh_test() {
+    local user="$1"
+    local host="$2"
+    local opts
+    opts=$(build_ssh_opts)
+    
+    # shellcheck disable=SC2086
+    ssh -o BatchMode=yes -o ConnectTimeout=10 $opts "$user@$host" "echo ok" &>/dev/null
+}
 
 # =============================================================================
 # Remote Script Definition
@@ -500,6 +564,12 @@ echo -e "${BLUE}║${NC}  ${BOLD}VS Code Tunnel Setup${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "  Server:       ${CYAN}$SSH_USER@$SERVER_IP${NC}"
+if [[ -n "$SSH_PORT" ]]; then
+    echo -e "  SSH Port:     ${CYAN}$SSH_PORT${NC}"
+fi
+if [[ -n "$SSH_IDENTITY" ]]; then
+    echo -e "  SSH Key:      ${CYAN}$SSH_IDENTITY${NC}"
+fi
 echo -e "  Tunnel name:  ${CYAN}$MACHINE_NAME${NC}"
 echo ""
 
@@ -512,7 +582,7 @@ USER_CREATED=false
 
 # Test SSH connection with specified user
 echo -e "${GREEN}🔗 Testing connection as $SSH_USER@$SERVER_IP...${NC}"
-if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_USER@$SERVER_IP" "echo ok" &>/dev/null; then
+if ! ssh_test "$SSH_USER" "$SERVER_IP"; then
     USER_EXISTS=false
     echo -e "${YELLOW}⚠ Cannot connect as '$SSH_USER'${NC}"
     
@@ -520,7 +590,7 @@ if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_USER@$SERVER_IP" "echo ok" 
     if [[ "$SSH_USER" != "root" ]]; then
         echo -e "${YELLOW}  Trying to connect as root to create user...${NC}"
         
-        if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "root@$SERVER_IP" "echo ok" &>/dev/null; then
+        if ! ssh_test "root" "$SERVER_IP"; then
             echo -e "${RED}✗ Cannot connect as root either.${NC}"
             echo -e "${RED}  Please ensure:${NC}"
             echo -e "${RED}    - User '$SSH_USER' exists on the server, or${NC}"
@@ -531,60 +601,69 @@ if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_USER@$SERVER_IP" "echo ok" 
         echo -e "${GREEN}✓ Connected as root${NC}"
         echo -e "${YELLOW}  Creating user '$SSH_USER'...${NC}"
         
-        # Create user and copy SSH key from root
-        ssh -t "root@$SERVER_IP" bash << EOF
+        # Create user setup script
+        USER_SETUP_SCRIPT=$(cat << 'USERSCRIPT'
+#!/bin/bash
 set -e
+TARGET_USER="__TARGET_USER__"
 
 # Check if user already exists
-if id "$SSH_USER" &>/dev/null; then
-    echo "✓ User '$SSH_USER' already exists"
+if id "$TARGET_USER" &>/dev/null; then
+    echo "✓ User '$TARGET_USER' already exists"
     exit 0
 fi
 
 # Create user with home directory
-useradd -m -s /bin/bash "$SSH_USER"
-echo "✓ User '$SSH_USER' created"
+useradd -m -s /bin/bash "$TARGET_USER"
+echo "✓ User '$TARGET_USER' created"
 
 # Get user's home directory
-USER_HOME=\$(getent passwd "$SSH_USER" | cut -d: -f6)
+USER_HOME=$(getent passwd "$TARGET_USER" | cut -d: -f6)
 
 # Create .ssh directory for the user
-mkdir -p "\$USER_HOME/.ssh"
-chmod 700 "\$USER_HOME/.ssh"
+mkdir -p "$USER_HOME/.ssh"
+chmod 700 "$USER_HOME/.ssh"
 
 # Copy root's authorized_keys to the new user
 if [[ -f /root/.ssh/authorized_keys ]]; then
-    cp /root/.ssh/authorized_keys "\$USER_HOME/.ssh/authorized_keys"
-    chmod 600 "\$USER_HOME/.ssh/authorized_keys"
-    chown -R "$SSH_USER:$SSH_USER" "\$USER_HOME/.ssh"
-    echo "✓ SSH keys copied from root to '$SSH_USER'"
+    cp /root/.ssh/authorized_keys "$USER_HOME/.ssh/authorized_keys"
+    chmod 600 "$USER_HOME/.ssh/authorized_keys"
+    chown -R "$TARGET_USER:$TARGET_USER" "$USER_HOME/.ssh"
+    echo "✓ SSH keys copied from root to '$TARGET_USER'"
 else
     echo "⚠ No /root/.ssh/authorized_keys found"
 fi
 
 # Add user to sudo group (for service management)
 if command -v usermod &>/dev/null; then
-    usermod -aG sudo "$SSH_USER" 2>/dev/null || usermod -aG wheel "$SSH_USER" 2>/dev/null || true
+    usermod -aG sudo "$TARGET_USER" 2>/dev/null || usermod -aG wheel "$TARGET_USER" 2>/dev/null || true
     echo "✓ User added to sudo group"
 fi
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  Please set a password for '$SSH_USER' (required for sudo):"
+echo "  Please set a password for '$TARGET_USER' (required for sudo):"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-passwd "$SSH_USER"
+passwd "$TARGET_USER"
 
 echo ""
 echo "✓ User setup complete"
-EOF
+USERSCRIPT
+)
+        # Replace placeholder with actual username
+        USER_SETUP_SCRIPT="${USER_SETUP_SCRIPT//__TARGET_USER__/$SSH_USER}"
+        
+        # Copy script to server and execute with TTY
+        echo "$USER_SETUP_SCRIPT" | ssh_cmd "root" "$SERVER_IP" "cat > /tmp/user_setup.sh && chmod +x /tmp/user_setup.sh"
+        ssh_cmd_tty "root" "$SERVER_IP" "/tmp/user_setup.sh && rm /tmp/user_setup.sh"
         
         USER_CREATED=true
         echo -e "${GREEN}✓ User '$SSH_USER' created and SSH keys copied${NC}"
         
         # Verify we can now connect as the new user
         sleep 1
-        if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$SSH_USER@$SERVER_IP" "echo ok" &>/dev/null; then
+        if ! ssh_test "$SSH_USER" "$SERVER_IP"; then
             echo -e "${RED}✗ Still cannot connect as '$SSH_USER' after creation${NC}"
             exit 1
         fi
@@ -604,7 +683,7 @@ REMOTE_SCRIPT=$(generate_remote_script "$MACHINE_NAME" "$SSH_USER")
 echo -e "${GREEN}🔗 Connecting to $SSH_USER@$SERVER_IP...${NC}"
 echo ""
 
-ssh -t "$SSH_USER@$SERVER_IP" "$REMOTE_SCRIPT"
+ssh_cmd_tty "$SSH_USER" "$SERVER_IP" "$REMOTE_SCRIPT"
 
 echo ""
 echo -e "${GREEN}╔════════════════════════════════════════════════════════════════╗${NC}"
