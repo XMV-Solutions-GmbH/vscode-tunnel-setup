@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT OR Apache-2.0
 # Main test runner for VS Code Tunnel Setup Script
 # Executes all test suites and generates reports
+# shellcheck disable=SC2034,SC2317
 
 set -e
 
