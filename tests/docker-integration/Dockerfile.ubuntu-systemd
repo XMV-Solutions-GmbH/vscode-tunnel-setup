@@ -1,7 +1,7 @@
 # Real Docker Integration Test Environment
 # Ubuntu with systemd for realistic service testing
 
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 
 # Avoid interactive prompts
 ENV DEBIAN_FRONTEND=noninteractive
