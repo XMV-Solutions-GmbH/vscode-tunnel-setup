@@ -188,29 +188,85 @@ fi
 echo ""
 echo "🔐 Starting VS Code Tunnel for authentication..."
 echo ""
-echo "=========================================="
-echo "📋 IMPORTANT - GitHub Authentication:"
-echo "=========================================="
-echo ""
 
-# Start tunnel in foreground for authentication
-# The tunnel displays the GitHub Device Code
+# Stop any existing tunnel process
 sudo systemctl stop code-tunnel.service 2>/dev/null || true
+pkill -f "code tunnel" 2>/dev/null || true
+sleep 2
 
-# Start tunnel and wait for Device Code
-echo "Starting tunnel... Waiting for GitHub Device Code..."
+echo "⚠ Waiting for GitHub Device Code..."
 echo ""
 
-# Start tunnel - displays the code
-/usr/local/bin/code tunnel --accept-server-license-terms --name "$MACHINE_NAME" &
+# Create a temp file for tunnel output
+TUNNEL_OUTPUT=$(mktemp)
+TUNNEL_CONNECTED=false
+AUTH_TIMEOUT=180
+
+# Start tunnel in background, capture output
+/usr/local/bin/code tunnel --accept-server-license-terms --name "$MACHINE_NAME" > "$TUNNEL_OUTPUT" 2>&1 &
 TUNNEL_PID=$!
 
-# Wait briefly for the code to be displayed
-sleep 15
+# Wait for Device Code to appear
+DEVICE_CODE=""
+WAIT_COUNT=0
+while [[ -z "$DEVICE_CODE" ]] && [[ $WAIT_COUNT -lt 30 ]]; do
+    sleep 1
+    WAIT_COUNT=$((WAIT_COUNT + 1))
+    # Extract device code from output (format: "use code XXXX-XXXX")
+    if [[ -f "$TUNNEL_OUTPUT" ]]; then
+        DEVICE_CODE=$(grep -oE "[A-Z0-9]{4}-[A-Z0-9]{4}" "$TUNNEL_OUTPUT" 2>/dev/null | head -1)
+    fi
+done
 
-# Stop tunnel
+if [[ -n "$DEVICE_CODE" ]]; then
+    echo ""
+    echo "╔════════════════════════════════════════════════════════════════╗"
+    echo "║                                                                ║"
+    echo "║   GitHub Device Code:  $DEVICE_CODE                               ║"
+    echo "║                                                                ║"
+    echo "║   Open: https://github.com/login/device                        ║"
+    echo "║                                                                ║"
+    echo "╚════════════════════════════════════════════════════════════════╝"
+    echo ""
+    echo "  Please authenticate in your browser with the code above."
+    echo ""
+    echo "▶ Waiting for tunnel to connect (up to ${AUTH_TIMEOUT}s)..."
+    
+    # Wait for successful connection or timeout
+    ELAPSED=0
+    while [[ $ELAPSED -lt $AUTH_TIMEOUT ]]; do
+        # Check if tunnel connected successfully
+        if grep -q "Connected to" "$TUNNEL_OUTPUT" 2>/dev/null; then
+            TUNNEL_CONNECTED=true
+            echo ""
+            echo "✅ Authentication successful! Tunnel connected."
+            break
+        fi
+        
+        # Check if tunnel process died
+        if ! kill -0 $TUNNEL_PID 2>/dev/null; then
+            break
+        fi
+        
+        # Progress indicator
+        printf "\\r  Connecting... %ds / %ds " "$ELAPSED" "$AUTH_TIMEOUT"
+        
+        sleep 2
+        ELAPSED=$((ELAPSED + 2))
+    done
+    echo ""
+else
+    echo "⚠️  Could not retrieve Device Code. Check output:"
+    cat "$TUNNEL_OUTPUT"
+fi
+
+# Stop the foreground tunnel process
 kill $TUNNEL_PID 2>/dev/null || true
 wait $TUNNEL_PID 2>/dev/null || true
+rm -f "$TUNNEL_OUTPUT"
+
+# Small delay to ensure clean handoff
+sleep 2
 
 echo ""
 echo "=========================================="
