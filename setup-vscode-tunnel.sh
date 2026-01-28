@@ -195,44 +195,18 @@ pkill -f "code tunnel" 2>/dev/null || true
 sleep 2
 
 echo "╔════════════════════════════════════════════════════════════════╗"
-echo "║  Please wait for the GitHub Device Code to appear below...     ║"
-echo "║  Then open: https://github.com/login/device                    ║"
+echo "║  The GitHub Device Code will appear below.                     ║"
+echo "║  Open: https://github.com/login/device                         ║"
 echo "║  Enter the code and authenticate with GitHub.                  ║"
 echo "║                                                                ║"
-echo "║  The script will continue automatically after authentication.  ║"
-echo "║  Timeout: 180 seconds                                          ║"
+echo "║  After authenticating, press Ctrl+C to continue.               ║"
 echo "╚════════════════════════════════════════════════════════════════╝"
 echo ""
 
-# Run tunnel in foreground with timeout
-# Use script to capture output while displaying it (works better over SSH)
-TUNNEL_LOG="/tmp/tunnel_auth_$$.log"
+# Run tunnel in foreground - user sees output directly and presses Ctrl+C when done
+/usr/local/bin/code tunnel --accept-server-license-terms --name "$MACHINE_NAME" || true
 
-# Run tunnel with timeout, capture output
-timeout 180 /usr/local/bin/code tunnel --accept-server-license-terms --name "$MACHINE_NAME" 2>&1 | tee "$TUNNEL_LOG" &
-TUNNEL_PID=$!
-
-# Wait for "Connected to" message or timeout
-CONNECTED=false
-for i in $(seq 1 180); do
-    sleep 1
-    if grep -q "Connected to" "$TUNNEL_LOG" 2>/dev/null; then
-        CONNECTED=true
-        echo ""
-        echo "✅ Authentication successful! Tunnel connected."
-        break
-    fi
-    if ! kill -0 $TUNNEL_PID 2>/dev/null; then
-        break
-    fi
-done
-
-# Cleanup
-kill $TUNNEL_PID 2>/dev/null || true
-wait $TUNNEL_PID 2>/dev/null || true
-rm -f "$TUNNEL_LOG"
-
-sleep 2
+echo ""
 
 echo ""
 echo "=========================================="
