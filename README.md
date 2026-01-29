@@ -120,6 +120,7 @@ Examples:
 - Linux with systemd
 - curl or wget
 - Internet access (to download VS Code CLI and connect to tunnel service)
+- **IPv4 connectivity** (see [IPv6-only Servers](#ipv6-only-servers) below)
 
 ### Tested on
 
@@ -127,6 +128,49 @@ Examples:
 - Debian 11, 12
 - Raspberry Pi OS
 - Alpine Linux (with systemd)
+
+---
+
+## IPv6-only Servers
+
+**IPv6-only servers are not supported** out of the box.
+
+GitHub (required for VS Code Tunnel authentication) does not support IPv6. If your server has no IPv4 connectivity, the setup will fail with the error:
+
+```text
+✗ Cannot connect to github.com
+
+  This server appears to be IPv6-only, but GitHub requires IPv4.
+```
+
+### Workaround: Configure NAT64/DNS64
+
+If you need to use an IPv6-only server, you can manually configure a NAT64 gateway before running this script.
+
+**Example for Hetzner Cloud servers:**
+
+```bash
+# SSH into your server
+ssh root@your-server
+
+# Configure Hetzner DNS64
+sudo mkdir -p /etc/systemd/resolved.conf.d/
+sudo tee /etc/systemd/resolved.conf.d/dns64.conf << 'EOF'
+[Resolve]
+DNS=2a01:4f8:c2c:123f::1
+FallbackDNS=2a01:4ff:ff00::add:2
+EOF
+
+# Clear any link-specific DNS and restart
+sudo resolvectl dns eth0 ''
+sudo systemctl restart systemd-resolved
+
+# Verify GitHub is now reachable
+curl -s -o /dev/null -w '%{http_code}' https://github.com
+# Should output: 200
+```
+
+After configuring NAT64, you can run the setup script normally.
 
 ---
 
