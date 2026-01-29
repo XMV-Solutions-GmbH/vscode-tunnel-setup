@@ -177,6 +177,24 @@ if [[ "$SSH_USER" != "root" ]] && ! validate_linux_username "$SSH_USER"; then
     exit 1
 fi
 
+# Validate tunnel name format
+# Tunnel names: alphanumeric, underscore, hyphen only (no dots or special characters)
+validate_tunnel_name() {
+    local name="$1"
+    
+    # Check length (1-64 characters)
+    if [[ ${#name} -lt 1 || ${#name} -gt 64 ]]; then
+        return 1
+    fi
+    
+    # Must contain only letters, digits, underscore, hyphen
+    if [[ ! "$name" =~ ^[A-Za-z0-9_-]+$ ]]; then
+        return 1
+    fi
+    
+    return 0
+}
+
 # Prompt for machine name if not provided (SSH mode)
 if [[ "$EXPORT_MODE" != "true" && "$EXPORT_SCRIPT_ONLY" != "true" && -z "$MACHINE_NAME" ]]; then
     echo -e "${YELLOW}Please enter a name for this VS Code Tunnel instance:${NC}"
@@ -185,6 +203,18 @@ if [[ "$EXPORT_MODE" != "true" && "$EXPORT_SCRIPT_ONLY" != "true" && -z "$MACHIN
         echo -e "${RED}Error: Machine name is required${NC}"
         exit 1
     fi
+fi
+
+# Validate tunnel name (after it's set, either from -n flag or prompt)
+if [[ -n "$MACHINE_NAME" ]] && ! validate_tunnel_name "$MACHINE_NAME"; then
+    echo -e "${RED}Error: Invalid tunnel name '$MACHINE_NAME'${NC}"
+    echo -e "${RED}  Tunnel names must:${NC}"
+    echo -e "${RED}    - Contain only letters, digits, underscore (_), or hyphen (-)${NC}"
+    echo -e "${RED}    - Be 1-64 characters long${NC}"
+    echo -e "${RED}    - NOT contain dots, spaces, or other special characters${NC}"
+    echo ""
+    echo -e "${YELLOW}Example: Use 'my-server' or 'dev_machine' instead of 'my.server.com'${NC}"
+    exit 1
 fi
 
 # Build SSH options array
@@ -333,6 +363,47 @@ esac
 print_success "Architecture: $ARCH → $ARCH_NAME"
 
 # -----------------------------------------------------------------------------
+# Step 1b: Check Network Connectivity (IPv6-only detection)
+# -----------------------------------------------------------------------------
+
+print_step "Checking Network Connectivity"
+
+# Test if we can reach GitHub (required for authentication)
+# GitHub does not support IPv6, so IPv6-only servers will fail
+check_github_connectivity() {
+    # Try to connect to GitHub API with a short timeout
+    if command -v curl &> /dev/null; then
+        curl -s --connect-timeout 10 -o /dev/null https://github.com 2>/dev/null
+        return $?
+    elif command -v wget &> /dev/null; then
+        wget -q --timeout=10 -O /dev/null https://github.com 2>/dev/null
+        return $?
+    else
+        # If neither curl nor wget, we'll fail later anyway
+        return 0
+    fi
+}
+
+if ! check_github_connectivity; then
+    print_error "Cannot connect to github.com"
+    echo ""
+    echo "  This server appears to be IPv6-only, but GitHub requires IPv4."
+    echo "  VS Code Tunnel authentication will not work without IPv4 connectivity."
+    echo ""
+    echo "  Possible solutions:"
+    echo "    1. Enable IPv4 on this server"
+    echo "    2. Configure a NAT64/DNS64 gateway (e.g., Hetzner DNS64)"
+    echo "    3. Use a server with IPv4 connectivity"
+    echo ""
+    echo "  For more information, see:"
+    echo "    https://github.com/XMV-Solutions-GmbH/vscode-tunnel-setup#ipv6-only-servers"
+    echo ""
+    exit 1
+fi
+
+print_success "GitHub connectivity verified"
+
+# -----------------------------------------------------------------------------
 # Step 2: Install VS Code CLI
 # -----------------------------------------------------------------------------
 
@@ -395,11 +466,59 @@ else
     SERVICE_USER_HOME=$(getent passwd "$RUN_AS_USER" | cut -d: -f6 || echo "/home/$RUN_AS_USER")
 fi
 
+# Always clean up existing tunnel state before (re)configuration
+# This prevents issues where a previously authenticated tunnel blocks new auth
+cleanup_tunnel_state() {
+    print_info "Cleaning up existing tunnel state..."
+    
+    # Stop the service if running
+    if command -v sudo &> /dev/null && [[ $EUID -ne 0 ]]; then
+        sudo systemctl stop code-tunnel.service 2>/dev/null || true
+        sudo systemctl disable code-tunnel.service 2>/dev/null || true
+    else
+        systemctl stop code-tunnel.service 2>/dev/null || true
+        systemctl disable code-tunnel.service 2>/dev/null || true
+    fi
+    
+    # Logout from any existing tunnel session
+    if [[ -f "$VSCODE_CLI" ]]; then
+        # Run as the service user to clear their tunnel state
+        if [[ "$RUN_AS_USER" != "root" ]] && [[ $EUID -eq 0 ]]; then
+            su - "$RUN_AS_USER" -c "/usr/local/bin/code tunnel user logout 2>/dev/null" || true
+            su - "$RUN_AS_USER" -c "/usr/local/bin/code tunnel unregister 2>/dev/null" || true
+        else
+            /usr/local/bin/code tunnel user logout 2>/dev/null || true
+            /usr/local/bin/code tunnel unregister 2>/dev/null || true
+        fi
+    fi
+    
+    # Remove old service file
+    if [[ -f "$SERVICE_FILE" ]]; then
+        if command -v sudo &> /dev/null && [[ $EUID -ne 0 ]]; then
+            sudo rm -f "$SERVICE_FILE"
+        else
+            rm -f "$SERVICE_FILE"
+        fi
+    fi
+    
+    # Reload systemd to forget the old service
+    if command -v sudo &> /dev/null && [[ $EUID -ne 0 ]]; then
+        sudo systemctl daemon-reload 2>/dev/null || true
+    else
+        systemctl daemon-reload 2>/dev/null || true
+    fi
+    
+    sleep 1
+}
+
 if [[ -f "$SERVICE_FILE" ]]; then
     if grep -q "name $MACHINE_NAME" "$SERVICE_FILE" && grep -q "User=$RUN_AS_USER" "$SERVICE_FILE"; then
-        print_success "Systemd service already configured for '$MACHINE_NAME' (user: $RUN_AS_USER)"
+        print_info "Service already configured for '$MACHINE_NAME', cleaning up for fresh setup..."
+        cleanup_tunnel_state
+        SERVICE_NEEDED=true  # Need to recreate after cleanup
     else
-        print_info "Service exists with different config, updating..."
+        print_info "Service exists with different config, cleaning up and updating..."
+        cleanup_tunnel_state
         SERVICE_NEEDED=true
     fi
 else
@@ -447,14 +566,6 @@ fi
 # -----------------------------------------------------------------------------
 
 print_step "Starting Service & GitHub Authentication"
-
-# Stop any existing tunnel process
-if command -v sudo &> /dev/null && [[ $EUID -ne 0 ]]; then
-    sudo systemctl stop code-tunnel.service 2>/dev/null || true
-else
-    systemctl stop code-tunnel.service 2>/dev/null || true
-fi
-sleep 2
 
 # Start the service (it will request GitHub auth)
 print_info "Starting tunnel service..."
