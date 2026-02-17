@@ -785,7 +785,7 @@ if [[ -f /root/.ssh/authorized_keys ]]; then
         [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
         if ! grep -Fxq "$key" "$USER_HOME/.ssh/authorized_keys" 2>/dev/null; then
             echo "$key" >> "$USER_HOME/.ssh/authorized_keys"
-            ((keys_added++))
+            keys_added=$((keys_added + 1))
         fi
     done < /root/.ssh/authorized_keys
     
