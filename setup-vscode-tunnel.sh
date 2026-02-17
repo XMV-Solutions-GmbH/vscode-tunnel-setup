@@ -755,16 +755,17 @@ if ! ssh_test "$SSH_USER" "$SERVER_IP"; then
 #!/bin/bash
 set -e
 TARGET_USER="__TARGET_USER__"
+USER_EXISTED=false
 
 # Check if user already exists
 if id "$TARGET_USER" &>/dev/null; then
     echo "✓ User '$TARGET_USER' already exists"
-    exit 0
+    USER_EXISTED=true
+else
+    # Create user with home directory
+    useradd -m -s /bin/bash "$TARGET_USER"
+    echo "✓ User '$TARGET_USER' created"
 fi
-
-# Create user with home directory
-useradd -m -s /bin/bash "$TARGET_USER"
-echo "✓ User '$TARGET_USER' created"
 
 # Get user's home directory
 USER_HOME=$(getent passwd "$TARGET_USER" | cut -d: -f6)
@@ -773,12 +774,27 @@ USER_HOME=$(getent passwd "$TARGET_USER" | cut -d: -f6)
 mkdir -p "$USER_HOME/.ssh"
 chmod 700 "$USER_HOME/.ssh"
 
-# Copy root's authorized_keys to the new user
+# Append root's authorized_keys to the user (avoiding duplicates)
 if [[ -f /root/.ssh/authorized_keys ]]; then
-    cp /root/.ssh/authorized_keys "$USER_HOME/.ssh/authorized_keys"
+    touch "$USER_HOME/.ssh/authorized_keys"
     chmod 600 "$USER_HOME/.ssh/authorized_keys"
+    
+    # Append only keys that don't already exist
+    keys_added=0
+    while IFS= read -r key || [[ -n "$key" ]]; do
+        [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
+        if ! grep -Fxq "$key" "$USER_HOME/.ssh/authorized_keys" 2>/dev/null; then
+            echo "$key" >> "$USER_HOME/.ssh/authorized_keys"
+            ((keys_added++))
+        fi
+    done < /root/.ssh/authorized_keys
+    
     chown -R "$TARGET_USER:$TARGET_USER" "$USER_HOME/.ssh"
-    echo "✓ SSH keys copied from root to '$TARGET_USER'"
+    if [[ $keys_added -gt 0 ]]; then
+        echo "✓ $keys_added SSH key(s) added to '$TARGET_USER'"
+    else
+        echo "✓ SSH keys already present for '$TARGET_USER'"
+    fi
 else
     echo "⚠ No /root/.ssh/authorized_keys found"
 fi
@@ -789,12 +805,15 @@ if command -v usermod &>/dev/null; then
     echo "✓ User added to sudo group"
 fi
 
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  Please set a password for '$TARGET_USER' (required for sudo):"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-passwd "$TARGET_USER"
+# Only prompt for password if user was newly created
+if [[ "$USER_EXISTED" == "false" ]]; then
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  Please set a password for '$TARGET_USER' (required for sudo):"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    passwd "$TARGET_USER"
+fi
 
 echo ""
 echo "✓ User setup complete"
@@ -807,12 +826,12 @@ USERSCRIPT
         echo "$USER_SETUP_SCRIPT" | ssh_cmd "root" "$SERVER_IP" "cat > /tmp/user_setup.sh && chmod +x /tmp/user_setup.sh"
         ssh_cmd_tty "root" "$SERVER_IP" "/tmp/user_setup.sh && rm /tmp/user_setup.sh"
         
-        echo -e "${GREEN}✓ User '$SSH_USER' created and SSH keys copied${NC}"
+        echo -e "${GREEN}✓ User '$SSH_USER' setup complete with SSH keys${NC}"
         
         # Verify we can now connect as the new user
         sleep 1
         if ! ssh_test "$SSH_USER" "$SERVER_IP"; then
-            echo -e "${RED}✗ Still cannot connect as '$SSH_USER' after creation${NC}"
+            echo -e "${RED}✗ Still cannot connect as '$SSH_USER' after setup${NC}"
             exit 1
         fi
         echo -e "${GREEN}✓ Connection as '$SSH_USER' verified${NC}"
