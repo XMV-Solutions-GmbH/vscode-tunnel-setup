@@ -177,18 +177,39 @@ if [[ "$SSH_USER" != "root" ]] && ! validate_linux_username "$SSH_USER"; then
     exit 1
 fi
 
-# Validate tunnel name format
-# Tunnel names: alphanumeric, underscore, hyphen only (no dots or special characters)
+# Validate tunnel name format (strict)
+# Tunnel names: lowercase ASCII, digits, underscore and hyphen only
+# Rules:
+#   - Only lowercase letters (a-z), digits (0-9), hyphen (-), underscore (_)
+#   - Must start with a lowercase letter
+#   - Must end with a lowercase letter or digit
+#   - No consecutive special characters (e.g. --, __, -_, _-)
+#   - Length: 2-20 characters
 validate_tunnel_name() {
     local name="$1"
     
-    # Check length (1-64 characters)
-    if [[ ${#name} -lt 1 || ${#name} -gt 64 ]]; then
+    # Check length (2-20 characters)
+    if [[ ${#name} -lt 2 || ${#name} -gt 20 ]]; then
         return 1
     fi
     
-    # Must contain only letters, digits, underscore, hyphen
-    if [[ ! "$name" =~ ^[A-Za-z0-9_-]+$ ]]; then
+    # Must contain only lowercase letters, digits, underscore, hyphen
+    if [[ ! "$name" =~ ^[a-z0-9_-]+$ ]]; then
+        return 1
+    fi
+    
+    # Must start with a lowercase letter
+    if [[ ! "$name" =~ ^[a-z] ]]; then
+        return 1
+    fi
+    
+    # Must end with a lowercase letter or digit
+    if [[ ! "$name" =~ [a-z0-9]$ ]]; then
+        return 1
+    fi
+    
+    # No consecutive special characters (hyphens/underscores)
+    if [[ "$name" =~ [-_]{2} ]]; then
         return 1
     fi
     
@@ -209,11 +230,13 @@ fi
 if [[ -n "$MACHINE_NAME" ]] && ! validate_tunnel_name "$MACHINE_NAME"; then
     echo -e "${RED}Error: Invalid tunnel name '$MACHINE_NAME'${NC}"
     echo -e "${RED}  Tunnel names must:${NC}"
-    echo -e "${RED}    - Contain only letters, digits, underscore (_), or hyphen (-)${NC}"
-    echo -e "${RED}    - Be 1-64 characters long${NC}"
-    echo -e "${RED}    - NOT contain dots, spaces, or other special characters${NC}"
+    echo -e "${RED}    - Contain only lowercase letters (a-z), digits (0-9), underscore (_), or hyphen (-)${NC}"
+    echo -e "${RED}    - Start with a lowercase letter${NC}"
+    echo -e "${RED}    - End with a lowercase letter or digit${NC}"
+    echo -e "${RED}    - Be 2-20 characters long${NC}"
+    echo -e "${RED}    - NOT contain consecutive special characters (e.g. --, __, -_)${NC}"
     echo ""
-    echo -e "${YELLOW}Example: Use 'my-server' or 'dev_machine' instead of 'my.server.com'${NC}"
+    echo -e "${YELLOW}Example: Use 'my-server' or 'dev_machine01' instead of 'My.Server.com'${NC}"
     exit 1
 fi
 
