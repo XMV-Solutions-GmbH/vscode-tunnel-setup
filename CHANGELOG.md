@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Strict tunnel name validation**: Tunnel names now follow much stricter rules
+  - Only lowercase letters (a-z), digits (0-9), hyphen (-), underscore (_)
+  - Must start with a lowercase letter
+  - Must end with a lowercase letter or digit
+  - No consecutive special characters (e.g. `--`, `__`, `-_`, `_-`)
+  - Length restricted to 2-20 characters (previously 1-64)
+  - Uppercase letters are no longer accepted
+- **Expanded test coverage**: 28 tunnel name validation tests (previously 11)
+
 ## [0.2.0] - 2026-01-28
 
 ### Added

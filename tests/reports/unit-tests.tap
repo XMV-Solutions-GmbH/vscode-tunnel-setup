@@ -1,4 +1,4 @@
-1..15
+1..53
 ok 1 help_flag_shows_usage: -h displays help text and exits 0
 ok 2 no_args_shows_help: No arguments displays help
 ok 3 ip_only_prompts_for_name: IP without -n triggers prompt
@@ -14,3 +14,41 @@ ok 12 machine_name_with_special_chars: Machine name with hyphens and numbers
 ok 13 flags_order_independent: Flags can be in any order
 ok 14 only_flag_no_ip_shows_error: Flag without IP shows error
 ok 15 interactive_name_input: Name provided via stdin works
+ok 16 validate_tunnel_name: accepts simple lowercase name
+ok 17 validate_tunnel_name: accepts name with hyphen
+ok 18 validate_tunnel_name: accepts name with underscore
+ok 19 validate_tunnel_name: accepts name with trailing digits
+ok 20 validate_tunnel_name: accepts minimum length (2 chars)
+ok 21 validate_tunnel_name: accepts maximum length (20 chars)
+ok 22 validate_tunnel_name: accepts complex valid name
+ok 23 validate_tunnel_name: rejects uppercase letters
+ok 24 validate_tunnel_name: rejects name with dots
+ok 25 validate_tunnel_name: rejects name with spaces
+ok 26 validate_tunnel_name: rejects name with special characters (@!)
+ok 27 validate_tunnel_name: rejects name with slash
+ok 28 validate_tunnel_name: rejects name with colon
+ok 29 validate_tunnel_name: rejects name with hash
+ok 30 validate_tunnel_name: rejects name with plus
+ok 31 validate_tunnel_name: rejects name with tilde
+ok 32 validate_tunnel_name: rejects name starting with digit
+ok 33 validate_tunnel_name: rejects name starting with hyphen
+ok 34 validate_tunnel_name: rejects name starting with underscore
+ok 35 validate_tunnel_name: rejects name ending with hyphen
+ok 36 validate_tunnel_name: rejects name ending with underscore
+ok 37 validate_tunnel_name: rejects consecutive hyphens
+ok 38 validate_tunnel_name: rejects consecutive underscores
+ok 39 validate_tunnel_name: rejects mixed consecutive special chars
+ok 40 validate_tunnel_name: rejects underscore-hyphen sequence
+ok 41 validate_tunnel_name: rejects empty name
+ok 42 validate_tunnel_name: rejects single character
+ok 43 validate_tunnel_name: rejects name longer than 20 characters
+ok 44 validate_linux_username: accepts simple lowercase name
+ok 45 validate_linux_username: accepts name with numbers
+ok 46 validate_linux_username: accepts name with hyphen
+ok 47 validate_linux_username: accepts name with underscore
+ok 48 validate_linux_username: rejects name starting with number
+ok 49 validate_linux_username: rejects uppercase letters
+ok 50 validate_linux_username: rejects dots in username
+ok 51 validate_linux_username: rejects name longer than 32 characters
+ok 52 check_github_connectivity: succeeds when GitHub is reachable
+ok 53 check_github_connectivity: fails when GitHub is unreachable (IPv6-only)

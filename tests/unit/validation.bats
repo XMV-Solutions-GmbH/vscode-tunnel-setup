@@ -47,18 +47,39 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-# Validate tunnel name format
-# Tunnel names: alphanumeric, underscore, hyphen only (no dots or special characters)
+# Validate tunnel name format (strict)
+# Tunnel names: lowercase ASCII, digits, underscore and hyphen only
+# Rules:
+#   - Only lowercase letters (a-z), digits (0-9), hyphen (-), underscore (_)
+#   - Must start with a lowercase letter
+#   - Must end with a lowercase letter or digit
+#   - No consecutive special characters (e.g. --, __, -_, _-)
+#   - Length: 2-20 characters
 validate_tunnel_name() {
     local name="$1"
     
-    # Check length (1-64 characters)
-    if [[ ${#name} -lt 1 || ${#name} -gt 64 ]]; then
+    # Check length (2-20 characters)
+    if [[ ${#name} -lt 2 || ${#name} -gt 20 ]]; then
         return 1
     fi
     
-    # Must contain only letters, digits, underscore, hyphen
-    if [[ ! "$name" =~ ^[A-Za-z0-9_-]+$ ]]; then
+    # Must contain only lowercase letters, digits, underscore, hyphen
+    if [[ ! "$name" =~ ^[a-z0-9_-]+$ ]]; then
+        return 1
+    fi
+    
+    # Must start with a lowercase letter
+    if [[ ! "$name" =~ ^[a-z] ]]; then
+        return 1
+    fi
+    
+    # Must end with a lowercase letter or digit
+    if [[ ! "$name" =~ [a-z0-9]$ ]]; then
+        return 1
+    fi
+    
+    # No consecutive special characters (hyphens/underscores)
+    if [[ "$name" =~ [-_]{2} ]]; then
         return 1
     fi
     
@@ -120,7 +141,9 @@ EOF
 # Tunnel Name Validation Tests
 # =============================================================================
 
-@test "validate_tunnel_name: accepts simple alphanumeric name" {
+# --- Valid names ---
+
+@test "validate_tunnel_name: accepts simple lowercase name" {
     run bash "$TEST_TMP_DIR/validation_test.sh" validate_tunnel_name "myserver"
     assert_success
 }
@@ -135,14 +158,31 @@ EOF
     assert_success
 }
 
-@test "validate_tunnel_name: accepts name with numbers" {
+@test "validate_tunnel_name: accepts name with trailing digits" {
     run bash "$TEST_TMP_DIR/validation_test.sh" validate_tunnel_name "server01"
     assert_success
 }
 
-@test "validate_tunnel_name: accepts mixed case" {
-    run bash "$TEST_TMP_DIR/validation_test.sh" validate_tunnel_name "MyServer-01"
+@test "validate_tunnel_name: accepts minimum length (2 chars)" {
+    run bash "$TEST_TMP_DIR/validation_test.sh" validate_tunnel_name "ab"
     assert_success
+}
+
+@test "validate_tunnel_name: accepts maximum length (20 chars)" {
+    run bash "$TEST_TMP_DIR/validation_test.sh" validate_tunnel_name "abcdefghij1234567890"
+    assert_success
+}
+
+@test "validate_tunnel_name: accepts complex valid name" {
+    run bash "$TEST_TMP_DIR/validation_test.sh" validate_tunnel_name "dev-machine_01"
+    assert_success
+}
+
+# --- Invalid names: character restrictions ---
+
+@test "validate_tunnel_name: rejects uppercase letters" {
+    run bash "$TEST_TMP_DIR/validation_test.sh" validate_tunnel_name "MyServer"
+    assert_failure
 }
 
 @test "validate_tunnel_name: rejects name with dots" {
@@ -155,26 +195,98 @@ EOF
     assert_failure
 }
 
-@test "validate_tunnel_name: rejects name with special characters" {
+@test "validate_tunnel_name: rejects name with special characters (@!)" {
     run bash "$TEST_TMP_DIR/validation_test.sh" validate_tunnel_name "my@server!"
     assert_failure
 }
+
+@test "validate_tunnel_name: rejects name with slash" {
+    run bash "$TEST_TMP_DIR/validation_test.sh" validate_tunnel_name "my/server"
+    assert_failure
+}
+
+@test "validate_tunnel_name: rejects name with colon" {
+    run bash "$TEST_TMP_DIR/validation_test.sh" validate_tunnel_name "my:server"
+    assert_failure
+}
+
+@test "validate_tunnel_name: rejects name with hash" {
+    run bash "$TEST_TMP_DIR/validation_test.sh" validate_tunnel_name "my#server"
+    assert_failure
+}
+
+@test "validate_tunnel_name: rejects name with plus" {
+    run bash "$TEST_TMP_DIR/validation_test.sh" validate_tunnel_name "my+server"
+    assert_failure
+}
+
+@test "validate_tunnel_name: rejects name with tilde" {
+    run bash "$TEST_TMP_DIR/validation_test.sh" validate_tunnel_name "my~server"
+    assert_failure
+}
+
+# --- Invalid names: structural rules ---
+
+@test "validate_tunnel_name: rejects name starting with digit" {
+    run bash "$TEST_TMP_DIR/validation_test.sh" validate_tunnel_name "1server"
+    assert_failure
+}
+
+@test "validate_tunnel_name: rejects name starting with hyphen" {
+    run bash "$TEST_TMP_DIR/validation_test.sh" validate_tunnel_name "-server"
+    assert_failure
+}
+
+@test "validate_tunnel_name: rejects name starting with underscore" {
+    run bash "$TEST_TMP_DIR/validation_test.sh" validate_tunnel_name "_server"
+    assert_failure
+}
+
+@test "validate_tunnel_name: rejects name ending with hyphen" {
+    run bash "$TEST_TMP_DIR/validation_test.sh" validate_tunnel_name "server-"
+    assert_failure
+}
+
+@test "validate_tunnel_name: rejects name ending with underscore" {
+    run bash "$TEST_TMP_DIR/validation_test.sh" validate_tunnel_name "server_"
+    assert_failure
+}
+
+@test "validate_tunnel_name: rejects consecutive hyphens" {
+    run bash "$TEST_TMP_DIR/validation_test.sh" validate_tunnel_name "my--server"
+    assert_failure
+}
+
+@test "validate_tunnel_name: rejects consecutive underscores" {
+    run bash "$TEST_TMP_DIR/validation_test.sh" validate_tunnel_name "my__server"
+    assert_failure
+}
+
+@test "validate_tunnel_name: rejects mixed consecutive special chars" {
+    run bash "$TEST_TMP_DIR/validation_test.sh" validate_tunnel_name "my-_server"
+    assert_failure
+}
+
+@test "validate_tunnel_name: rejects underscore-hyphen sequence" {
+    run bash "$TEST_TMP_DIR/validation_test.sh" validate_tunnel_name "my_-server"
+    assert_failure
+}
+
+# --- Invalid names: length restrictions ---
 
 @test "validate_tunnel_name: rejects empty name" {
     run bash "$TEST_TMP_DIR/validation_test.sh" validate_tunnel_name ""
     assert_failure
 }
 
-@test "validate_tunnel_name: rejects name longer than 64 characters" {
-    local long_name=$(printf 'a%.0s' {1..65})
-    run bash "$TEST_TMP_DIR/validation_test.sh" validate_tunnel_name "$long_name"
+@test "validate_tunnel_name: rejects single character" {
+    run bash "$TEST_TMP_DIR/validation_test.sh" validate_tunnel_name "a"
     assert_failure
 }
 
-@test "validate_tunnel_name: accepts name with exactly 64 characters" {
-    local exact_name=$(printf 'a%.0s' {1..64})
-    run bash "$TEST_TMP_DIR/validation_test.sh" validate_tunnel_name "$exact_name"
-    assert_success
+@test "validate_tunnel_name: rejects name longer than 20 characters" {
+    run bash "$TEST_TMP_DIR/validation_test.sh" validate_tunnel_name "abcdefghij12345678901"
+    assert_failure
 }
 
 # =============================================================================
