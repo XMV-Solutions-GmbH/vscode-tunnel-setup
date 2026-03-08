@@ -44,8 +44,8 @@ if [[ "$1" == "--help" || "$1" == "-h" ]]; then
     echo "This script will:"
     echo "  1. Bump the version in VERSION and setup-vscode-tunnel.sh"
     echo "  2. Run all tests"
-    echo "  3. Commit and tag (v\$VERSION)"
-    echo "  4. Push to origin (triggers GitHub Release workflow)"
+    echo "  3. Create a release branch + PR (protected main)"
+    echo "  4. Auto-merge and tag (triggers GitHub Release workflow)"
     exit 0
 fi
 
@@ -165,8 +165,8 @@ echo ""
 # ── Confirm ───────────────────────────────────────────────────────────────────
 
 echo -e "${BOLD}Ready to release v${NEW_VERSION}${NC}"
-echo -e "  This will commit, tag, and push to origin."
-echo -e "  The GitHub Release workflow will create the release automatically."
+echo -e "  This will create a release branch, PR, and auto-merge to main."
+echo -e "  The GitHub Release workflow will then create the release automatically."
 echo ""
 echo -n "  Proceed? [y/N]: "
 read -r CONFIRM
@@ -177,18 +177,70 @@ if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
     exit 0
 fi
 
-# ── Commit, tag, push ────────────────────────────────────────────────────────
+# ── Create release branch, PR, and merge ──────────────────────────────────────
+
+RELEASE_BRANCH="release/v${NEW_VERSION}"
 
 echo ""
-echo -e "${CYAN}Committing...${NC}"
+echo -e "${CYAN}Creating release branch ${RELEASE_BRANCH}...${NC}"
+git checkout -b "$RELEASE_BRANCH"
+
 git add VERSION setup-vscode-tunnel.sh CHANGELOG.md
 git commit -m "chore(release): bump version to $NEW_VERSION"
 
+echo -e "${CYAN}Pushing ${RELEASE_BRANCH}...${NC}"
+git push -u origin "$RELEASE_BRANCH"
+
+echo -e "${CYAN}Creating PR...${NC}"
+PR_URL=$(gh pr create \
+    --title "chore(release): bump version to $NEW_VERSION" \
+    --body "Automated release PR — bumps version from $CURRENT_VERSION to $NEW_VERSION ($LEVEL)." \
+    --base main \
+    --head "$RELEASE_BRANCH" 2>&1)
+
+echo -e "  ${GREEN}✓${NC} $PR_URL"
+
+echo -e "${CYAN}Waiting for CI checks and auto-merging...${NC}"
+if ! gh pr merge "$RELEASE_BRANCH" --squash --auto --delete-branch 2>&1; then
+    echo -e "${YELLOW}Auto-merge queued. Waiting for CI to pass...${NC}"
+fi
+
+# Wait for merge to complete (poll for up to 180s)
+WAIT_COUNT=0
+MAX_WAIT=180
+MERGED=false
+
+while [[ $WAIT_COUNT -lt $MAX_WAIT ]]; do
+    PR_STATE=$(gh pr view "$RELEASE_BRANCH" --json state -q '.state' 2>/dev/null || echo "UNKNOWN")
+    if [[ "$PR_STATE" == "MERGED" ]]; then
+        MERGED=true
+        break
+    elif [[ "$PR_STATE" == "CLOSED" ]]; then
+        echo -e "${RED}PR was closed without merging.${NC}"
+        exit 1
+    fi
+    sleep 5
+    WAIT_COUNT=$((WAIT_COUNT + 5))
+    printf "\r  Waiting for CI + merge... %ds / %ds " "$WAIT_COUNT" "$MAX_WAIT"
+done
+echo ""
+
+if [[ "$MERGED" != "true" ]]; then
+    echo -e "${YELLOW}PR auto-merge is queued but CI is still running.${NC}"
+    echo -e "${YELLOW}The tag will be created once the merge completes.${NC}"
+    echo -e "  Check: ${CYAN}$PR_URL${NC}"
+    git checkout main
+    exit 0
+fi
+
+# Switch back to main and pull the merged changes
+echo -e "${CYAN}Pulling merged changes...${NC}"
+git checkout main
+git pull origin main
+
+# Tag the merged commit
 echo -e "${CYAN}Tagging ${TAG_NAME}...${NC}"
 git tag -a "$TAG_NAME" -m "Release $NEW_VERSION"
-
-echo -e "${CYAN}Pushing to origin...${NC}"
-git push origin main
 git push origin "$TAG_NAME"
 
 echo ""
