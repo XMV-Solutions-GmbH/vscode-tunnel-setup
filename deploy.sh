@@ -200,38 +200,47 @@ PR_URL=$(gh pr create \
 
 echo -e "  ${GREEN}✓${NC} $PR_URL"
 
-echo -e "${CYAN}Waiting for CI checks and auto-merging...${NC}"
-if ! gh pr merge "$RELEASE_BRANCH" --squash --auto --delete-branch 2>&1; then
-    echo -e "${YELLOW}Auto-merge queued. Waiting for CI to pass...${NC}"
-fi
+echo -e "${CYAN}Waiting for CI checks to pass...${NC}"
 
-# Wait for merge to complete (poll for up to 180s)
+# Wait for CI checks to pass (poll for up to 180s)
 WAIT_COUNT=0
 MAX_WAIT=180
-MERGED=false
+CI_PASSED=false
 
 while [[ $WAIT_COUNT -lt $MAX_WAIT ]]; do
-    PR_STATE=$(gh pr view "$RELEASE_BRANCH" --json state -q '.state' 2>/dev/null || echo "UNKNOWN")
-    if [[ "$PR_STATE" == "MERGED" ]]; then
-        MERGED=true
+    CHECK_STATUS=$(gh pr checks "$RELEASE_BRANCH" 2>&1)
+    
+    if echo "$CHECK_STATUS" | grep -q "All checks were successful"; then
+        CI_PASSED=true
         break
-    elif [[ "$PR_STATE" == "CLOSED" ]]; then
-        echo -e "${RED}PR was closed without merging.${NC}"
+    elif echo "$CHECK_STATUS" | grep -q "failing"; then
+        echo ""
+        echo -e "${RED}CI checks failed:${NC}"
+        echo "$CHECK_STATUS"
+        echo ""
+        echo -e "${YELLOW}Cleaning up release branch...${NC}"
+        git checkout main
+        git branch -D "$RELEASE_BRANCH" 2>/dev/null || true
+        gh pr close "$RELEASE_BRANCH" --delete-branch 2>/dev/null || true
         exit 1
     fi
-    sleep 5
-    WAIT_COUNT=$((WAIT_COUNT + 5))
-    printf "\r  Waiting for CI + merge... %ds / %ds " "$WAIT_COUNT" "$MAX_WAIT"
+    
+    sleep 10
+    WAIT_COUNT=$((WAIT_COUNT + 10))
+    printf "\r  Waiting for CI... %ds / %ds " "$WAIT_COUNT" "$MAX_WAIT"
 done
 echo ""
 
-if [[ "$MERGED" != "true" ]]; then
-    echo -e "${YELLOW}PR auto-merge is queued but CI is still running.${NC}"
-    echo -e "${YELLOW}The tag will be created once the merge completes.${NC}"
-    echo -e "  Check: ${CYAN}$PR_URL${NC}"
+if [[ "$CI_PASSED" != "true" ]]; then
+    echo -e "${YELLOW}CI checks are still running after ${MAX_WAIT}s.${NC}"
+    echo -e "  Merge manually when ready: ${CYAN}gh pr merge $RELEASE_BRANCH --squash --delete-branch${NC}"
     git checkout main
     exit 0
 fi
+
+echo -e "${GREEN}✓ CI checks passed${NC}"
+echo -e "${CYAN}Merging PR...${NC}"
+gh pr merge "$RELEASE_BRANCH" --squash --delete-branch
 
 # Switch back to main and pull the merged changes
 echo -e "${CYAN}Pulling merged changes...${NC}"
