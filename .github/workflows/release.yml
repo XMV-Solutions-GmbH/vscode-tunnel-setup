@@ -27,13 +27,15 @@ jobs:
       - name: Validate script syntax
         run: bash -n setup-vscode-tunnel.sh
 
+      - name: Install bats-core
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bats
+
       - name: Run unit tests
         run: |
-          if command -v bats &> /dev/null; then
-            bats tests/unit/
-          else
-            echo "BATS not installed, skipping unit tests"
-          fi
+          chmod +x tests/run_tests.sh
+          ./tests/run_tests.sh unit
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
