@@ -33,6 +33,7 @@ SERVER_IP=""
 MACHINE_NAME=""
 EXPORT_MODE=false
 EXPORT_SCRIPT_ONLY=false
+ROOT_ACCESS_AVAILABLE=false
 
 # Display help
 show_help() {
@@ -771,6 +772,7 @@ if ! ssh_test "$SSH_USER" "$SERVER_IP"; then
         fi
         
         echo -e "${GREEN}✓ Connected as root${NC}"
+        ROOT_ACCESS_AVAILABLE=true
         echo -e "${YELLOW}  Creating user '$SSH_USER'...${NC}"
         
         # Create user setup script
@@ -874,6 +876,57 @@ USERSCRIPT
 fi
 
 echo ""
+
+# If SSH_USER is root and test passed, we have root access
+if [[ "$SSH_USER" == "root" ]]; then
+    ROOT_ACCESS_AVAILABLE=true
+fi
+
+# -----------------------------------------------------------------------------
+# Optional: Full Server Update
+# -----------------------------------------------------------------------------
+
+if [[ "$ROOT_ACCESS_AVAILABLE" == "true" ]]; then
+    echo -e "${YELLOW}Would you like to perform a full server update first?${NC}"
+    echo -e "  This will run: ${CYAN}apt update && apt upgrade${NC} followed by a ${CYAN}reboot${NC}"
+    echo -e -n "  Perform update? ${CYAN}[y/N]${NC}: "
+    read -r UPDATE_ANSWER
+
+    if [[ "$UPDATE_ANSWER" =~ ^[Yy]$ ]]; then
+        echo ""
+        echo -e "${GREEN}🔄 Running system update on $SERVER_IP...${NC}"
+        ssh_cmd_tty "root" "$SERVER_IP" "apt update && DEBIAN_FRONTEND=noninteractive apt upgrade -y"
+
+        echo ""
+        echo -e "${GREEN}🔄 Rebooting server...${NC}"
+        # Use nohup + sleep to allow SSH to disconnect cleanly before reboot
+        ssh_cmd "root" "$SERVER_IP" "nohup bash -c 'sleep 2 && reboot' &>/dev/null &" 2>/dev/null || true
+
+        echo -e "${YELLOW}⏳ Waiting for server to come back online...${NC}"
+        sleep 15
+
+        REBOOT_WAIT=0
+        REBOOT_MAX=120
+        while [[ $REBOOT_WAIT -lt $REBOOT_MAX ]]; do
+            if ssh_test "$SSH_USER" "$SERVER_IP" 2>/dev/null; then
+                break
+            fi
+            sleep 5
+            REBOOT_WAIT=$((REBOOT_WAIT + 5))
+            printf "\r  Waiting... %ds / %ds " "$REBOOT_WAIT" "$REBOOT_MAX"
+        done
+        echo ""
+
+        if [[ $REBOOT_WAIT -ge $REBOOT_MAX ]]; then
+            echo -e "${RED}✗ Server did not come back online within ${REBOOT_MAX}s${NC}"
+            echo -e "${RED}  Please check the server manually and re-run this script.${NC}"
+            exit 1
+        fi
+
+        echo -e "${GREEN}✓ Server is back online${NC}"
+        echo ""
+    fi
+fi
 
 # Generate the remote script with the target user
 REMOTE_SCRIPT=$(generate_remote_script "$MACHINE_NAME" "$SSH_USER")
