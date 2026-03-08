@@ -15,6 +15,9 @@
 
 set -e
 
+# Script version (update on release)
+SCRIPT_VERSION="0.4.0"
+
 # Colours for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -482,6 +485,7 @@ print_step "Configuring Systemd Service"
 
 SERVICE_FILE="/etc/systemd/system/code-tunnel.service"
 SERVICE_NEEDED=false
+SKIP_AUTH=false
 
 # Determine home directory for the service user
 if [[ "$RUN_AS_USER" == "root" ]]; then
@@ -490,66 +494,150 @@ else
     SERVICE_USER_HOME=$(getent passwd "$RUN_AS_USER" | cut -d: -f6 || echo "/home/$RUN_AS_USER")
 fi
 
-# Always clean up existing tunnel state before (re)configuration
-# This prevents issues where a previously authenticated tunnel blocks new auth
+# -----------------------------------------------------------------------------
+# Helper: run a command with sudo if needed (non-root)
+# -----------------------------------------------------------------------------
+run_privileged() {
+    if [[ $EUID -eq 0 ]]; then
+        "$@"
+    else
+        sudo "$@"
+    fi
+}
+
+# Ensure sudo credentials are cached once (avoids repeated password prompts)
+ensure_sudo() {
+    if [[ $EUID -eq 0 ]]; then
+        return 0
+    fi
+    
+    # Test if we already have passwordless sudo or cached credentials
+    if sudo -n true 2>/dev/null; then
+        return 0
+    fi
+    
+    echo ""
+    print_info "Root privileges required for systemd service management."
+    print_info "Please enter your password once — it will be cached for this session."
+    echo ""
+    
+    if ! sudo -v; then
+        print_error "Could not obtain sudo privileges"
+        print_info "Ensure user '$RUN_AS_USER' is in the sudo group, or run via --export mode as root."
+        exit 1
+    fi
+}
+
+# Clean up existing tunnel state (stop, unregister, remove service file)
 cleanup_tunnel_state() {
     print_info "Cleaning up existing tunnel state..."
     
     # Stop the service if running
-    if command -v sudo &> /dev/null && [[ $EUID -ne 0 ]]; then
-        sudo systemctl stop code-tunnel.service 2>/dev/null || true
-        sudo systemctl disable code-tunnel.service 2>/dev/null || true
-    else
-        systemctl stop code-tunnel.service 2>/dev/null || true
-        systemctl disable code-tunnel.service 2>/dev/null || true
-    fi
+    run_privileged systemctl stop code-tunnel.service 2>/dev/null || true
+    run_privileged systemctl disable code-tunnel.service 2>/dev/null || true
     
-    # Logout from any existing tunnel session
-    if [[ -f "$VSCODE_CLI" ]]; then
-        # Run as the service user to clear their tunnel state
-        if [[ "$RUN_AS_USER" != "root" ]] && [[ $EUID -eq 0 ]]; then
-            su - "$RUN_AS_USER" -c "/usr/local/bin/code tunnel user logout 2>/dev/null" || true
-            su - "$RUN_AS_USER" -c "/usr/local/bin/code tunnel unregister 2>/dev/null" || true
-        else
-            /usr/local/bin/code tunnel user logout 2>/dev/null || true
-            /usr/local/bin/code tunnel unregister 2>/dev/null || true
-        fi
+    # Remove tunnel state files directly instead of using 'code tunnel unregister'
+    # (unregister requires interactive GitHub auth which blocks non-interactively)
+    if [[ "$RUN_AS_USER" != "root" ]]; then
+        local user_home
+        user_home=$(getent passwd "$RUN_AS_USER" | cut -d: -f6 || echo "/home/$RUN_AS_USER")
+        rm -rf "$user_home/.vscode/cli/code_tunnel" 2>/dev/null || true
+    else
+        rm -rf /root/.vscode/cli/code_tunnel 2>/dev/null || true
     fi
     
     # Remove old service file
     if [[ -f "$SERVICE_FILE" ]]; then
-        if command -v sudo &> /dev/null && [[ $EUID -ne 0 ]]; then
-            sudo rm -f "$SERVICE_FILE"
-        else
-            rm -f "$SERVICE_FILE"
-        fi
+        run_privileged rm -f "$SERVICE_FILE"
     fi
     
     # Reload systemd to forget the old service
-    if command -v sudo &> /dev/null && [[ $EUID -ne 0 ]]; then
-        sudo systemctl daemon-reload 2>/dev/null || true
-    else
-        systemctl daemon-reload 2>/dev/null || true
-    fi
+    run_privileged systemctl daemon-reload 2>/dev/null || true
     
     sleep 1
 }
 
+# -----------------------------------------------------------------------------
+# Idempotency: check if the service is already correctly configured
+# -----------------------------------------------------------------------------
+
 if [[ -f "$SERVICE_FILE" ]]; then
-    if grep -q "name $MACHINE_NAME" "$SERVICE_FILE" && grep -q "User=$RUN_AS_USER" "$SERVICE_FILE"; then
-        print_info "Service already configured for '$MACHINE_NAME', cleaning up for fresh setup..."
-        cleanup_tunnel_state
-        SERVICE_NEEDED=true  # Need to recreate after cleanup
+    EXISTING_NAME=$(grep -oP 'name \K\S+' "$SERVICE_FILE" 2>/dev/null || true)
+    EXISTING_USER=$(grep -oP 'User=\K\S+' "$SERVICE_FILE" 2>/dev/null || true)
+    
+    if [[ "$EXISTING_NAME" == "$MACHINE_NAME" && "$EXISTING_USER" == "$RUN_AS_USER" ]]; then
+        # Same tunnel name AND same user — check if it's already running
+        if systemctl is-active --quiet code-tunnel.service 2>/dev/null; then
+            print_success "Service already running for '$MACHINE_NAME' (user: $RUN_AS_USER)"
+            SKIP_AUTH=true
+            SERVICE_NEEDED=false
+        else
+            # Service configured correctly but not running — try to restart
+            print_info "Service configured for '$MACHINE_NAME' but not running, restarting..."
+            ensure_sudo
+            run_privileged systemctl enable code-tunnel.service 2>/dev/null || true
+            run_privileged systemctl start code-tunnel.service
+            
+            sleep 3
+            
+            if systemctl is-active --quiet code-tunnel.service 2>/dev/null; then
+                print_success "Service restarted successfully"
+                SKIP_AUTH=true
+                SERVICE_NEEDED=false
+            else
+                # Could not restart — ask user what to do
+                echo ""
+                print_error "Service failed to restart for '$MACHINE_NAME'"
+                print_info "Recent logs:"
+                journalctl -u code-tunnel --no-pager -n 10 2>/dev/null || true
+                echo ""
+                echo -n "  Overwrite tunnel config and re-register? [y/N]: "
+                read -r OVERWRITE_ANSWER
+                
+                if [[ "$OVERWRITE_ANSWER" =~ ^[Yy]$ ]]; then
+                    print_info "Reconfiguring tunnel..."
+                    cleanup_tunnel_state
+                    SERVICE_NEEDED=true
+                else
+                    print_info "Aborted. Check logs: journalctl -u code-tunnel -f"
+                    exit 1
+                fi
+            fi
+        fi
     else
-        print_info "Service exists with different config, cleaning up and updating..."
-        cleanup_tunnel_state
-        SERVICE_NEEDED=true
+        # Different config — ask user whether to overwrite
+        echo ""
+        print_info "Existing tunnel found:"
+        print_info "  Name: $EXISTING_NAME (requested: $MACHINE_NAME)"
+        print_info "  User: $EXISTING_USER (requested: $RUN_AS_USER)"
+        
+        if systemctl is-active --quiet code-tunnel.service 2>/dev/null; then
+            print_info "  Status: running"
+        else
+            print_info "  Status: stopped"
+        fi
+        
+        echo ""
+        echo -n "  Replace existing tunnel with '$MACHINE_NAME'? [y/N]: "
+        read -r OVERWRITE_ANSWER
+        
+        if [[ "$OVERWRITE_ANSWER" =~ ^[Yy]$ ]]; then
+            ensure_sudo
+            print_info "Replacing tunnel configuration..."
+            cleanup_tunnel_state
+            SERVICE_NEEDED=true
+        else
+            print_info "Keeping existing tunnel. No changes made."
+            exit 0
+        fi
     fi
 else
     SERVICE_NEEDED=true
 fi
 
 if $SERVICE_NEEDED; then
+    ensure_sudo
+    
     print_info "Creating service file (running as user: $RUN_AS_USER)..."
     
     SERVICE_CONTENT="[Unit]
@@ -574,13 +662,8 @@ WantedBy=multi-user.target"
     fi
     
     print_info "Reloading systemd..."
-    if command -v sudo &> /dev/null && [[ $EUID -ne 0 ]]; then
-        sudo systemctl daemon-reload
-        sudo systemctl enable code-tunnel.service
-    else
-        systemctl daemon-reload
-        systemctl enable code-tunnel.service
-    fi
+    run_privileged systemctl daemon-reload
+    run_privileged systemctl enable code-tunnel.service
     
     print_success "Systemd service created and enabled (user: $RUN_AS_USER)"
 fi
@@ -589,110 +672,150 @@ fi
 # Step 4: Start Service & GitHub Authentication
 # -----------------------------------------------------------------------------
 
-print_step "Starting Service & GitHub Authentication"
-
-# Start the service (it will request GitHub auth)
-print_info "Starting tunnel service..."
-if command -v sudo &> /dev/null && [[ $EUID -ne 0 ]]; then
-    sudo systemctl start code-tunnel.service
-else
-    systemctl start code-tunnel.service
-fi
-
-sleep 3
-
-# Wait for device code to appear in logs
-print_info "Waiting for GitHub Device Code..."
-
-DEVICE_CODE=""
-WAIT_COUNT=0
-MAX_WAIT=60
-
-while [[ $WAIT_COUNT -lt $MAX_WAIT ]]; do
-    LOG_OUTPUT=$(journalctl -u code-tunnel --no-pager -n 50 2>/dev/null || true)
+if [[ "$SKIP_AUTH" == "true" ]]; then
+    # Service is already running — skip straight to verification
+    print_step "Verifying Tunnel Service"
     
-    if echo "$LOG_OUTPUT" | grep -q "use code"; then
-        DEVICE_CODE=$(echo "$LOG_OUTPUT" | grep -o '[A-Z0-9]\{4\}-[A-Z0-9]\{4\}' | tail -1)
-        break
+    if systemctl is-active --quiet code-tunnel.service; then
+        # Check recent logs for the tunnel URL
+        TUNNEL_URL=$(journalctl -u code-tunnel --no-pager -n 100 2>/dev/null \
+            | grep -o 'https://vscode.dev/tunnel/[^ ]*' | tail -1 || true)
+        
+        echo ""
+        echo "╔════════════════════════════════════════════════════════════════╗"
+        echo ""
+        echo "   ✓ VS Code Tunnel is already running!"
+        echo ""
+        echo "   Connect via:"
+        echo "     • VS Code: Remote Explorer → Tunnels → $MACHINE_NAME"
+        if [[ -n "$TUNNEL_URL" ]]; then
+            echo "     • Browser: $TUNNEL_URL"
+        else
+            echo "     • Browser: https://vscode.dev/tunnel/$MACHINE_NAME"
+        fi
+        echo ""
+        echo "   No changes were made — tunnel is idempotent."
+        echo ""
+        echo "╚════════════════════════════════════════════════════════════════╝"
+        echo ""
+        print_success "Already set up — nothing to do!"
+    else
+        print_error "Service was expected to be running but is not"
+        systemctl status code-tunnel.service --no-pager || true
+        exit 1
+    fi
+else
+    print_step "Starting Service & GitHub Authentication"
+    
+    # Start the service (it will request GitHub auth)
+    print_info "Starting tunnel service..."
+    run_privileged systemctl start code-tunnel.service
+    
+    sleep 3
+    
+    # Wait for device code to appear in logs
+    print_info "Waiting for GitHub Device Code..."
+    
+    DEVICE_CODE=""
+    WAIT_COUNT=0
+    MAX_WAIT=60
+    
+    while [[ $WAIT_COUNT -lt $MAX_WAIT ]]; do
+        LOG_OUTPUT=$(journalctl -u code-tunnel --no-pager -n 50 2>/dev/null || true)
+        
+        if echo "$LOG_OUTPUT" | grep -q "use code"; then
+            DEVICE_CODE=$(echo "$LOG_OUTPUT" | grep -o '[A-Z0-9]\{4\}-[A-Z0-9]\{4\}' | tail -1)
+            break
+        fi
+        
+        # Check if tunnel is already authenticated (no device code needed)
+        if echo "$LOG_OUTPUT" | grep -qi "open this link\|tunnel/"; then
+            DEVICE_CODE="ALREADY_AUTHENTICATED"
+            break
+        fi
+        
+        sleep 1
+        WAIT_COUNT=$((WAIT_COUNT + 1))
+    done
+    
+    if [[ "$DEVICE_CODE" == "ALREADY_AUTHENTICATED" ]]; then
+        print_success "Tunnel connected (previously authenticated)"
+    elif [[ -n "$DEVICE_CODE" ]]; then
+        echo ""
+        echo "╔════════════════════════════════════════════════════════════════╗"
+        echo "                                                                  "
+        echo "    GitHub Device Code:  $DEVICE_CODE  (📋 copied to clipboard)"
+        echo ""
+        echo "    🌐 https://github.com/login/device  (opening in browser...)"
+        echo ""
+        echo "    Just paste the code and authenticate with GitHub."
+        echo ""
+        echo "    Waiting for authentication (up to 180 seconds)..."
+        echo "                                                                  "
+        echo "╚════════════════════════════════════════════════════════════════╝"
+        echo ""
+    else
+        print_error "Could not detect Device Code from service logs"
+        print_info "Check logs: journalctl -u code-tunnel -f"
+        exit 1
     fi
     
-    sleep 1
-    WAIT_COUNT=$((WAIT_COUNT + 1))
-done
-
-if [[ -n "$DEVICE_CODE" ]]; then
-    echo ""
-    echo "╔════════════════════════════════════════════════════════════════╗"
-    echo "                                                                  "
-    echo "    GitHub Device Code:  $DEVICE_CODE  (📋 copied to clipboard)"
-    echo ""
-    echo "    🌐 https://github.com/login/device  (opening in browser...)"
-    echo ""
-    echo "    Just paste the code and authenticate with GitHub."
-    echo ""
-    echo "    Waiting for authentication (up to 180 seconds)..."
-    echo "                                                                  "
-    echo "╚════════════════════════════════════════════════════════════════╝"
-    echo ""
-else
-    print_error "Could not detect Device Code from service logs"
-    print_info "Check logs: journalctl -u code-tunnel -f"
-    exit 1
-fi
-
-# Wait for tunnel to connect (authentication complete)
-TUNNEL_CONNECTED=false
-WAIT_COUNT=0
-MAX_WAIT=180
-
-while [[ $WAIT_COUNT -lt $MAX_WAIT ]]; do
-    LOG_OUTPUT=$(journalctl -u code-tunnel --no-pager -n 100 2>/dev/null || true)
-    
-    # Check for successful connection
-    if echo "$LOG_OUTPUT" | grep -qi "open this link\|connected\|tunnel/"; then
-        TUNNEL_CONNECTED=true
-        break
+    if [[ "$DEVICE_CODE" != "ALREADY_AUTHENTICATED" ]]; then
+        # Wait for tunnel to connect (authentication complete)
+        TUNNEL_CONNECTED=false
+        WAIT_COUNT=0
+        MAX_WAIT=180
+        
+        while [[ $WAIT_COUNT -lt $MAX_WAIT ]]; do
+            LOG_OUTPUT=$(journalctl -u code-tunnel --no-pager -n 100 2>/dev/null || true)
+            
+            # Check for successful connection
+            if echo "$LOG_OUTPUT" | grep -qi "open this link\|connected\|tunnel/"; then
+                TUNNEL_CONNECTED=true
+                break
+            fi
+            
+            sleep 2
+            WAIT_COUNT=$((WAIT_COUNT + 2))
+            printf "\r  Waiting for authentication... %ds / %ds " "$WAIT_COUNT" "$MAX_WAIT"
+        done
+        
+        echo ""
+        
+        if [[ "$TUNNEL_CONNECTED" != "true" ]]; then
+            print_error "Timeout waiting for tunnel connection"
+            print_info "Check logs: journalctl -u code-tunnel -f"
+            exit 1
+        fi
     fi
     
-    sleep 2
-    WAIT_COUNT=$((WAIT_COUNT + 2))
-    printf "\r  Waiting for authentication... %ds / %ds " "$WAIT_COUNT" "$MAX_WAIT"
-done
-
-echo ""
-
-if [[ "$TUNNEL_CONNECTED" != "true" ]]; then
-    print_error "Timeout waiting for tunnel connection"
-    print_info "Check logs: journalctl -u code-tunnel -f"
-    exit 1
-fi
-
-# -----------------------------------------------------------------------------
-# Step 5: Verify Service Running
-# -----------------------------------------------------------------------------
-
-print_step "Verifying Tunnel Service"
-
-sleep 3
-
-# Check status
-if systemctl is-active --quiet code-tunnel.service; then
-    echo ""
-    echo "╔════════════════════════════════════════════════════════════════╗"
-    echo ""
-    echo "   🎉 VS Code Tunnel is running!"
-    echo ""
-    echo "   Connect via:"
-    echo "     • VS Code: Remote Explorer → Tunnels → $MACHINE_NAME"
-    echo "     • Browser: https://vscode.dev/tunnel/$MACHINE_NAME"
-    echo ""
-    echo "╚════════════════════════════════════════════════════════════════╝"
-    echo ""
-    print_success "Setup complete!"
-else
-    print_error "Service could not be started"
-    systemctl status code-tunnel.service --no-pager || true
-    exit 1
+    # -------------------------------------------------------------------------
+    # Verify Service Running
+    # -------------------------------------------------------------------------
+    
+    print_step "Verifying Tunnel Service"
+    
+    sleep 3
+    
+    # Check status
+    if systemctl is-active --quiet code-tunnel.service; then
+        echo ""
+        echo "╔════════════════════════════════════════════════════════════════╗"
+        echo ""
+        echo "   🎉 VS Code Tunnel is running!"
+        echo ""
+        echo "   Connect via:"
+        echo "     • VS Code: Remote Explorer → Tunnels → $MACHINE_NAME"
+        echo "     • Browser: https://vscode.dev/tunnel/$MACHINE_NAME"
+        echo ""
+        echo "╚════════════════════════════════════════════════════════════════╝"
+        echo ""
+        print_success "Setup complete!"
+    else
+        print_error "Service could not be started"
+        systemctl status code-tunnel.service --no-pager || true
+        exit 1
+    fi
 fi
 
 echo ""
@@ -727,7 +850,7 @@ fi
 # =============================================================================
 
 echo -e "${BLUE}╔════════════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE} ${NC}  ${BOLD}VS Code Tunnel Setup${NC}"
+echo -e "${BLUE} ${NC}  ${BOLD}VS Code Tunnel Setup${NC}  ${CYAN}v${SCRIPT_VERSION}${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "  Server:       ${CYAN}$SSH_USER@$SERVER_IP${NC}"
