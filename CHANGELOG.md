@@ -8,6 +8,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-05-11
+
+### Added
+
+- **Idempotent tunnel setup**: running the script with the same name/user on a host that already has a working service shows status only — no surprises, no re-registration. Interactive prompt when the existing config differs, asking before overwriting. `sudo` credentials cached once instead of repeated password prompts. Replaces the blocking `code tunnel unregister` call with direct state-file cleanup. ([#17](https://github.com/XMV-Solutions-GmbH/vscode-tunnel-setup/pull/17))
+- **`SCRIPT_VERSION` displayed in the script header** + new `VERSION` file as the canonical source of truth for release tooling. ([#17](https://github.com/XMV-Solutions-GmbH/vscode-tunnel-setup/pull/17))
+- **Release-deploy script** that drives the protected-`main` release flow: create a `release/vX.Y.Z` branch, open a PR via `gh`, wait for CI to go green, squash-merge, then tag the merged commit on `main` (triggers the GitHub Release workflow). ([#17](https://github.com/XMV-Solutions-GmbH/vscode-tunnel-setup/pull/17), [#18](https://github.com/XMV-Solutions-GmbH/vscode-tunnel-setup/pull/18), [#19](https://github.com/XMV-Solutions-GmbH/vscode-tunnel-setup/pull/19))
+
+### Fixed
+
+- **Release pipeline now runs unit tests.** Previously `bats-core` wasn't pre-installed on `ubuntu-latest`, so the release workflow silently skipped tests and printed a skip message. The workflow now installs `bats-core` explicitly (matching the CI workflow) and runs tests via the `run_tests.sh` harness. (commit `917763c`)
+- **Release-deploy script no longer needs auto-merge enabled on the repo.** Switched from `gh pr merge --auto` to polling CI then `gh pr merge --squash` once green. Release branch is cleaned up on CI failure. ([#19](https://github.com/XMV-Solutions-GmbH/vscode-tunnel-setup/pull/19))
+
+### Dependencies
+
+- Bump `actions/checkout` from 4 to 6, `softprops/action-gh-release` from 1 to 3, `actions/upload-artifact` (all in the `actions` group) — auto-merged via Dependabot. ([#21](https://github.com/XMV-Solutions-GmbH/vscode-tunnel-setup/pull/21))
+- Bump `ubuntu` base image from 24.04 to 26.04 in `/tests/docker-integration` — auto-merged via Dependabot. ([#22](https://github.com/XMV-Solutions-GmbH/vscode-tunnel-setup/pull/22))
+
+## [0.4.0] - 2026-03-08
+
+> CHANGELOG entry added retroactively in v0.5.0 — the v0.4.0 release shipped without a `CHANGELOG.md` block, but the tag exists and the feature below is what was published.
+
+### Added
+
+- **Optional full server update before tunnel setup.** New flag enabling a pre-tunnel-install host upgrade (apt-get update/upgrade/autoremove) on the SSH target before the VS Code tunnel binary is fetched. Useful for first-touch provisioning on a stale image. ([#15](https://github.com/XMV-Solutions-GmbH/vscode-tunnel-setup/pull/15))
+
 ## [0.3.0] - 2026-03-06
 
 ### Changed
@@ -77,7 +103,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Uses HTTPS for all downloads
 - Service runs with systemd isolation
 
-[Unreleased]: https://github.com/XMV-Solutions-GmbH/vscode-tunnel-setup/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/XMV-Solutions-GmbH/vscode-tunnel-setup/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/XMV-Solutions-GmbH/vscode-tunnel-setup/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/XMV-Solutions-GmbH/vscode-tunnel-setup/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/XMV-Solutions-GmbH/vscode-tunnel-setup/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/XMV-Solutions-GmbH/vscode-tunnel-setup/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/XMV-Solutions-GmbH/vscode-tunnel-setup/releases/tag/v0.1.0
