@@ -16,7 +16,7 @@
 set -e
 
 # Script version (update on release)
-SCRIPT_VERSION="0.4.0"
+SCRIPT_VERSION="0.5.0"
 
 # Colours for output
 RED='\033[0;31m'
