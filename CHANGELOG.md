@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Bump `actions/checkout` from 4 to 6, `softprops/action-gh-release` from 1 to 3, `actions/upload-artifact` (all in the `actions` group) — auto-merged via Dependabot. ([#21](https://github.com/XMV-Solutions-GmbH/vscode-tunnel-setup/pull/21))
 - Bump `ubuntu` base image from 24.04 to 26.04 in `/tests/docker-integration` — auto-merged via Dependabot. ([#22](https://github.com/XMV-Solutions-GmbH/vscode-tunnel-setup/pull/22))
+- Bump `alpine` base image from 3.19 to 3.23 in `/tests/fixtures` — auto-merged via Dependabot. ([#4](https://github.com/XMV-Solutions-GmbH/vscode-tunnel-setup/pull/4))
 
 ## [0.4.0] - 2026-03-08
 
